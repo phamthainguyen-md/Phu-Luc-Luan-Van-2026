@@ -2509,7 +2509,7 @@ nguong_thap <- 3
 nguong_cao <- 7
 
 cat("\n======================================================\n")
-cat("THÔNG SỐ ĐỂ BÁC SĨ ĐIỀN VÀO BẢNG 3.26 (PHÂN TẦNG NGUY CƠ)\n")
+cat("(PHÂN TẦNG NGUY CƠ)\n")
 cat("======================================================\n\n")
 
 # 1. Nhóm Nguy cơ thấp (0 - 3 điểm)
