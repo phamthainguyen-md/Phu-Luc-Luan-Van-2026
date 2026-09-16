@@ -1,0 +1,2554 @@
+---
+title: "MÃ LỆNH VÀ KẾT QUẢ MÔ HÌNH SCAP"
+author: "Phạm Thái Nguyên"
+date: "2026-09-16"
+output:
+  html_document:
+    df_print: paged
+  word_document: default
+---
+
+```{r setup, include=FALSE}
+# ======================================================================
+# BƯỚC 1: NẠP THƯ VIỆN & ĐỌC DỮ LIỆU
+# ======================================================================
+library(haven)    
+library(dplyr)    
+
+# Đọc file SPSS từ ổ đĩa D
+data_goc <- read_sav("D:/NghienCuu/Nghiencuu.sav")
+
+# Quy đổi giá trị 2 thành 0, lột nhãn SPSS và TỰ ĐỘNG CẮT LẠI NGƯỠNG ĐỊNH LƯỢNG
+data_clean <- data_goc %>%
+  mutate(
+    # Biến kết cục
+    GPB          = as.numeric(ifelse(GPB == 2, 0, GPB)), 
+    
+    # Các biến định tính có sẵn (Quy giá trị 2 về 0)
+    nguongtuoi   = as.numeric(ifelse(nguongtuoi == 2, 0, nguongtuoi)),
+    Soitrong     = as.numeric(ifelse(Soitrong == 2, 0, Soitrong)),
+    nguongtnm    = as.numeric(ifelse(nguongtnm == 2, 0, nguongtnm)),
+    Khitrong     = as.numeric(ifelse(Khitrong == 2, 0, Khitrong)),
+    hachviem     = as.numeric(ifelse(hachviem == 2, 0, hachviem)),
+    dichtudo     = as.numeric(ifelse(dichtudo == 2, 0, dichtudo)),
+    dichkhutru   = as.numeric(ifelse(dichkhutru == 2, 0, dichkhutru)),
+    nguongAIR    = as.numeric(ifelse(nguongAIR == 2, 0, nguongAIR)),
+    
+    # CẮT NGƯỠNG TRỰC TIẾP TỪ BIẾN ĐỊNH LƯỢNG GỐC ĐỂ ĐẢM BẢO CHÍNH XÁC 100%
+    nguongdkrt   = as.numeric(ifelse(dkruotthua > 11.5, 1, 0)),
+    nguongmt     = as.numeric(ifelse(dmanhtrang > 7.2, 1, 0)) 
+  )
+```
+
+1.  PHÂN TÍCH HỒI QUY LOGISTIC ĐA BIẾN (MÔ HÌNH 10 BIẾN ĐỊNH TÍNH) Đoạn mã dưới đây thiết lập mô hình hồi quy đa biến với 10 yếu tố nguy cơ. Kết quả (p-value, aOR, KTC 95%) được sử dụng để sàng lọc các biến độc lập có ý nghĩa thống kê làm cơ sở thiết lập mô hình rút gọn.
+
+```{r multi_model_10, echo=TRUE, warning=FALSE, message=FALSE}
+# Chạy mô hình hồi quy logistic đa biến
+model_10_vars <- glm(GPB ~ dichkhutru + nguongtnm + nguongAIR + 
+                       nguongdkrt + nguongmt + dichtudo + hachviem + 
+                       Khitrong + nguongtuoi + Soitrong, 
+                     data = data_clean, 
+                     family = binomial)
+
+# Hiển thị kết quả p-value
+summary(model_10_vars)
+
+# Tính tỷ số số chênh hiệu chỉnh (aOR) và Khoảng tin cậy 95%
+exp(cbind(aOR = coef(model_10_vars), confint(model_10_vars)))
+```
+
+**2. MÔ HÌNH RÚT GỌN (SCAP) VÀ ĐƯỜNG CONG ROC** Từ kết quả phân tích hồi quy logistic đa biến 10 biến ban đầu, chúng tôi tiến hành lọc ra 5 yếu tố tiên lượng có ý nghĩa thống kê độc lập (với mức ý nghĩa p \< 0,05), bao gồm: Dịch khu trú quanh ruột thừa, Thâm nhiễm mỡ, Điểm AIR ≥ 7, Đường kính ruột thừa \> 11,5 mm, và Bề dày thành manh tràng \> 7,2 mm. Năm biến số này được sử dụng để xây dựng mô hình dự báo rút gọn (Mô hình SCAP). Khả năng phân biệt của mô hình SCAP được đánh giá thông qua diện tích dưới đường cong ROC (AUC).
+
+```{r scap_model_roc, echo=TRUE, warning=FALSE, message=FALSE, fig.width=6, fig.height=6}
+# 1. Chạy mô hình SCAP rút gọn (5 biến)
+model_scap <- glm(GPB ~ dichkhutru + nguongtnm + nguongAIR + 
+                    nguongdkrt + nguongmt, 
+                  data = data_clean, 
+                  family = binomial)
+
+# Hiển thị kết quả aOR và KTC 95% 
+exp(cbind(aOR = coef(model_scap), confint(model_scap)))
+
+# 2. Vẽ đường cong ROC và tính chỉ số AUC
+library(pROC)
+
+# Tính xác suất dự báo (nguy cơ) cho từng bệnh nhân
+prob_scap <- predict(model_scap, type = "response")
+
+# Khởi tạo đối tượng ROC và tính KTC 95% của AUC
+roc_scap <- roc(data_clean$GPB, prob_scap)
+roc_ci <- ci(roc_scap)
+
+# Thiết lập định dạng hiển thị trục tọa độ (vô hiệu hóa định dạng số khoa học)
+options(scipen = 999)
+
+# Biểu diễn đồ thị đường cong ROC
+plot(roc_scap,
+     legacy.axes = TRUE,
+     col = "#1f77b4",
+     lwd = 2,
+     xlab = "Tỷ lệ dương tính giả (1 - Độ đặc hiệu)",
+     ylab = "Tỷ lệ dương tính thật (Độ nhạy)")
+
+# Trích xuất và định dạng nhãn thông số AUC và KTC 95%
+auc_text <- sprintf("AUC = %.3f", roc_ci[2])
+ci_text <- sprintf("KTC 95%%: %.3f - %.3f", roc_ci[1], roc_ci[3])
+
+# Tích hợp hộp chú thích (legend) vào góc đồ thị
+legend("bottomright",
+       legend = c(auc_text, ci_text),
+       text.col = "#1f77b4", 
+       text.font = 2,        
+       bty = "n")
+```
+
+**3. KIỂM ĐỊNH NỘI BỘ MÔ HÌNH (INTERNAL VALIDATION)** Để đảm bảo mô hình SCAP không bị hiện tượng quá khớp (overfitting) và có tính ổn định cao khi áp dụng trên quần thể mới, chúng tôi tiến hành kiểm định nội bộ bằng hai phương pháp: Tái chọn mẫu Bootstrap 2000 lần và Kiểm định chéo rời rạc (Leave-One-Out Cross-Validation - LOOCV).
+
+```{r validation_bootstrap_loocv, echo=TRUE, warning=FALSE, message=FALSE}
+# Thiết lập hạt giống ngẫu nhiên nhằm đảm bảo tính lặp lại (reproducibility) của thuật toán
+set.seed(2026) 
+
+# ==========================================
+# 3.1. BOOTSTRAP 2000 LẦN
+# ==========================================
+# Lấy mẫu ngẫu nhiên 2000 lần để tính lại Khoảng tin cậy 95% của AUC
+boot_auc <- ci.auc(roc_scap, method = "bootstrap", boot.n = 2000)
+
+cat("--- KẾT QUẢ BOOTSTRAP 2000 LẦN ---\n")
+print(boot_auc)
+
+# ==========================================
+# 3.2. KIỂM ĐỊNH CHÉO LOOCV
+# ==========================================
+n <- nrow(data_clean)
+loocv_preds <- numeric(n)
+
+# Vòng lặp: Huấn luyện mô hình n lần, mỗi lần bỏ ra 1 bệnh nhân để dự đoán
+for (i in 1:n) {
+  train_data <- data_clean[-i, ]
+  test_data  <- data_clean[i, , drop = FALSE]
+  
+  # Chạy lại phương trình 5 biến trên tập dữ liệu đã bỏ 1 người
+  fit_loocv <- glm(GPB ~ dichkhutru + nguongtnm + nguongAIR + 
+                     nguongdkrt + nguongmt, 
+                   data = train_data, 
+                   family = binomial)
+  
+  # Dự đoán xác suất cho chính người bị bỏ ra
+  loocv_preds[i] <- predict(fit_loocv, newdata = test_data, type = "response")
+}
+
+# Tính toán lại AUC dựa trên kết quả dự đoán chéo LOOCV
+roc_loocv <- roc(data_clean$GPB, loocv_preds)
+
+cat("\n--- KẾT QUẢ LOOCV ---\n")
+cat("AUC của mô hình SCAP sau kiểm định LOOCV:", round(auc(roc_loocv), 3), "\n")
+```
+
+**4. Mức độ hiệu chuẩn** Khả năng dự báo sát với thực tế của mô hình được đánh giá qua biểu đồ hiệu chuẩn (Calibration plot).
+
+```{r calibration_and_metrics, echo=TRUE, warning=FALSE, message=FALSE, fig.width=8, fig.height=8}
+# ==========================================
+# 4. VẼ BIỂU ĐỒ HIỆU CHUẨN BOOTSTRAP 
+# ==========================================
+library(rms)
+
+# 4.1 Thiết lập môi trường dữ liệu cho gói rms
+dd <- datadist(data_clean)
+options(datadist = "dd")
+
+# 4.2 Chạy lại mô hình bằng hàm lrm (để vẽ hiệu chuẩn)
+fit_rms <- lrm(GPB ~ dichkhutru + nguongtnm + nguongAIR + 
+                     nguongdkrt + nguongmt, 
+               data = data_clean, 
+               x = TRUE, y = TRUE)
+
+# 4.3 Thực hiện Bootstrap 2000 lần để hiệu chuẩn
+set.seed(2026)
+cal <- calibrate(fit_rms, method = "boot", B = 2000)
+
+# 4.4 Vẽ biểu đồ hiệu chuẩn
+# Tăng lề dưới (số 6) để có đủ không gian ghi chú thích mà không bị chật
+par(mar = c(6, 5, 4, 2) + 0.1)
+
+plot(cal,
+     lwd = 2,
+     legend = FALSE, 
+     subtitles = FALSE, # LỆNH QUAN TRỌNG: Tắt dòng chữ tiếng Anh mặc định gây chồng đè
+     xlab = "Xác suất dự đoán (Predicted Probability)",
+     ylab = "Tỷ lệ quan sát thực tế (Observed Proportion)",
+     xlim = c(0, 1), ylim = c(0, 1))
+
+# Thêm hộp chú thích (Legend) bằng tiếng Việt
+legend("bottomright", 
+       legend = c("Biểu kiến (Apparent)", 
+                  "Đã hiệu chỉnh sai lệch (Bias-corrected)", 
+                  "Lý tưởng (Ideal)", 
+                  "Khoảng tin cậy (C.L.)"),
+       lty = c(1, 1, 2, 1), 
+       col = c("black", "blue", "black", "gray"),
+       bty = "n", cex = 0.8)
+
+# Thêm 2 dòng ghi chú ở góc dưới biểu đồ (MAE và n)
+mtext("B = 2000 lần lặp lại, Bootstrap", side = 1, line = 4, adj = 0, cex = 0.8)
+mtext(sprintf("Sai số tuyệt đối trung bình (MAE) = %.2f | n = %d", 
+              mean(abs(cal[,"predy"] - cal[,"calibrated.corrected"])), 
+              nrow(data_clean)), 
+      side = 1, line = 4, adj = 1, cex = 0.8)
+
+# ==========================================
+# 5. TÍNH CHỈ SỐ RMSE VÀ F1-SCORE TỪ LOOCV (BẢNG 3.22)
+# ==========================================
+library(caret)
+
+# 5.1 Tính RMSE (Root Mean Square Error) từ xác suất dự đoán LOOCV
+# Công thức: Căn bậc hai của trung bình bình phương sai số
+rmse_loocv <- sqrt(mean((data_clean$GPB - loocv_preds)^2))
+
+# 5.2 Tính F1-Score
+# Chuyển đổi xác suất dự đoán thành phân nhóm (ngưỡng cắt 0.5)
+loocv_class <- ifelse(loocv_preds >= 0.5, 1, 0)
+
+# Lập ma trận nhầm lẫn (Confusion Matrix) để trích xuất F1
+cm <- confusionMatrix(factor(loocv_class, levels = c(0, 1)), 
+                      factor(data_clean$GPB, levels = c(0, 1)), 
+                      positive = "1")
+f1_loocv <- cm$byClass["F1"]
+
+# In kết quả ra màn hình
+cat("\n--- CÁC CHỈ SỐ HIỆU SUẤT LOOCV (CHO BẢNG 3.22) ---\n")
+cat("RMSE (Sai số toàn phương trung bình):", round(rmse_loocv, 2), "\n")
+cat("Chỉ số F1-Score:", round(f1_loocv, 2), "\n")
+```
+
+**5. Toán đồ (Nomogram) và Phân tích đường cong quyết định (DCA)** Nhằm tạo công cụ trực quan hỗ trợ bác sĩ lâm sàng tính toán nhanh xác suất biến chứng dựa trên 5 yếu tố của mô hình SCAP, chúng tôi tiến hành xây dựng Toán đồ (Nomogram). Bên cạnh đó, Phân tích đường cong quyết định (Decision Curve Analysis - DCA) được áp dụng để lượng giá lợi ích lâm sàng thực tế của mô hình so với các chiến lược can thiệp mặc định.
+
+```{r nomogram_and_dca, echo=TRUE, warning=FALSE, message=FALSE, fig.width=9, fig.height=6}
+# ==========================================
+# 1. VẼ TOÁN ĐỒ (NOMOGRAM) 
+# ==========================================
+library(rms)
+library(Hmisc) # Thư viện đi kèm rms để gán nhãn tiếng Việt
+
+# 1.1 Gán nhãn tiếng Việt cho các biến để in lên Nomogram
+label(data_clean$dichkhutru) <- "Dịch khu trú quanh ruột thừa"
+label(data_clean$nguongtnm)  <- "Thâm nhiễm mỡ toàn bộ chu vi"
+label(data_clean$nguongAIR)  <- "AIR >= 7 điểm"
+label(data_clean$nguongdkrt) <- "Đường kính ruột thừa > 11,5 mm"
+label(data_clean$nguongmt)   <- "Bề dày manh tràng > 7,2 mm"
+
+# 1.2 Đóng gói lại môi trường dữ liệu
+dd <- datadist(data_clean)
+options(datadist = "dd")
+
+# 1.3 Chạy lại mô hình lrm
+fit_rms <- lrm(GPB ~ dichkhutru + nguongtnm + nguongAIR + 
+                     nguongdkrt + nguongmt, 
+               data = data_clean, 
+               x = TRUE, y = TRUE)
+
+# 1.4 Tạo Nomogram 
+nom <- nomogram(fit_rms, 
+                fun = function(x) 1/(1+exp(-x)), 
+                funlabel = "Nguy cơ biến chứng (%)", 
+                fun.at = c(0.05, 0.1, 0.2, 0.3, 0.5, 0.7, 0.8, 0.9),
+                lp = FALSE) 
+
+# 1.5 Vẽ Toán đồ
+plot(nom, 
+     xfrac = 0.45,       # Căn lề trái cho chữ
+     cex.axis = 0.9,     # Cỡ chữ trục
+     cex.var = 0.9,      # Cỡ chữ tên biến
+     force.label = TRUE)
+
+# ==========================================
+# 2. PHÂN TÍCH ĐƯỜNG CONG QUYẾT ĐỊNH (DCA) 
+# ==========================================
+library(dcurves)
+library(ggplot2)
+
+# 2.1 Đưa xác suất từ mô hình vào dữ liệu
+data_clean$prob_scap <- prob_scap
+
+# 2.2 Chạy DCA
+dca_res <- dca(GPB ~ prob_scap, 
+               data = data_clean,
+               label = list(prob_scap = "Mô hình SCAP"))
+
+# 2.3 Vẽ biểu đồ DCA bằng thư viện ggplot2
+plot(dca_res, smooth = TRUE) + 
+  # Thiết lập định dạng đường vẽ (linetype)
+  aes(linetype = label) + 
+  # Cài đặt màu sắc và Việt hóa nhãn
+  scale_color_manual(
+    name = "Chiến lược",
+    breaks = c("Treat All", "Treat None", "Mô hình SCAP"),
+    labels = c("Can thiệp tất cả", "Không can thiệp", "Mô hình SCAP"),
+    values = c("Treat All" = "#7570b3", "Treat None" = "#1b9e77", "Mô hình SCAP" = "#d95f02")
+  ) +
+  # Cài đặt nét vẽ tương ứng màu
+  scale_linetype_manual(
+    name = "Chiến lược",
+    breaks = c("Treat All", "Treat None", "Mô hình SCAP"),
+    labels = c("Can thiệp tất cả", "Không can thiệp", "Mô hình SCAP"),
+    values = c("Treat All" = "dashed", "Treat None" = "dotted", "Mô hình SCAP" = "solid")
+  ) +
+  labs(title = NULL, # Bỏ tiêu đề trên cùng
+       x = "Ngưỡng xác suất (Threshold Probability)", 
+       y = "Lợi ích ròng (Net Benefit)") +
+  # Dùng theme_classic để xóa lưới, nền trắng viền đen
+  theme_classic() +
+  # Đưa chú thích vào góc trong bên phải
+  theme(legend.position = c(0.85, 0.75),
+        legend.background = element_blank(),
+        legend.box.background = element_blank())
+```
+
+```{r}
+# ==========================================
+# 5. VẼ BIỂU ĐỒ VIOLIN (ĐẶC ĐIỂM TUỔI VÀ GIỚI)
+# ==========================================
+library(ggplot2)
+library(dplyr)
+
+# 5.1 Xử lý dữ liệu: Trích xuất và dán nhãn cho biến giới tính
+df_violin <- data_clean %>%
+  filter(!is.na(gioi) & !is.na(tuoi)) %>% 
+  mutate(gioi_factor = factor(gioi, levels = c(1, 2), labels = c("Nam", "Nữ")))
+
+# 5.2 Tính toán số liệu (Trung vị và Khoảng tứ phân vị - IQR) để in lên biểu đồ
+summary_age <- df_violin %>%
+  group_by(gioi_factor) %>%
+  summarise(
+    median_age = median(tuoi),
+    iqr_age = IQR(tuoi)
+  ) %>%
+  mutate(
+    # Định dạng chuỗi văn bản: "Trung vị (IQR)"
+    # Dùng %.3g để hiển thị số thập phân linh hoạt (ví dụ: 28 hoặc 28.8 giống hệt hình)
+    label_text = sprintf("%.0f (%.3g)", median_age, iqr_age)
+  )
+
+# 5.3 Vẽ biểu đồ
+ggplot(df_violin, aes(x = gioi_factor, y = tuoi, fill = gioi_factor)) +
+  
+  # Lớp 1: Vẽ thân Violin (độ trong suốt 0.7, viền xám)
+  geom_violin(trim = FALSE, alpha = 0.7, color = "darkgrey") +
+  
+  # Lớp 2: Vẽ biểu đồ hộp (Boxplot) màu trắng lồng bên trong
+  geom_boxplot(width = 0.15, fill = "white", color = "black", 
+               outlier.shape = NA, fatten = 2) +
+  
+  # Lớp 3: Chèn nhãn văn bản (Trung vị và IQR)
+  geom_text(data = summary_age,
+            aes(x = gioi_factor, y = median_age, label = label_text),
+            nudge_x = 0.1,      # Đẩy chữ sang phải một chút để không đè vào hộp
+            hjust = 0,          # Căn lề trái cho chữ
+            size = 4, 
+            fontface = "bold") + # In đậm
+            
+  # Lớp 4: Tùy chỉnh màu sắc giống hệt bản gốc
+  scale_fill_manual(values = c("Nam" = "#99d8c9", "Nữ" = "#fcbba1")) +
+  
+  # Lớp 5: Tùy chỉnh trục Y (từ 0 đến 120, chia vạch mỗi 30 năm)
+  scale_y_continuous(breaks = seq(0, 120, by = 30), limits = c(0, 120)) +
+  
+  # Lớp 6: Gắn nhãn trục
+  labs(x = "Giới tính", y = "Tuổi (năm)") +
+  
+  # Lớp 7: Định dạng giao diện (Theme) tối giản, sạch sẽ
+  theme_minimal() +
+  theme(
+    legend.position = "none",             # Ẩn bảng chú giải màu
+    panel.grid.major.x = element_blank(), # Bỏ các đường kẻ dọc
+    panel.grid.minor = element_blank(),   # Bỏ các đường kẻ phụ
+    axis.title.x = element_text(fontface = "bold", margin = margin(t = 10)),
+    axis.title.y = element_text(fontface = "bold", margin = margin(r = 10)),
+    axis.text = element_text(color = "black", size = 11)
+  )
+```
+
+```{r air_violin, echo=TRUE, warning=FALSE, message=FALSE, fig.width=8, fig.height=6}
+# ==============================================================
+# 7. VẼ BIỂU ĐỒ VIOLIN (PHÂN BỐ ĐIỂM AIR THEO TÌNH TRẠNG BIẾN CHỨNG)
+# ==============================================================
+
+# 7.1 Xử lý dữ liệu: Trích xuất, dán nhãn và ép thứ tự cho biến GPB
+df_air <- data_clean %>%
+  filter(!is.na(GPB) & !is.na(AIR)) %>% 
+  mutate(GPB_factor = factor(GPB, levels = c(1, 2), labels = c("Có biến chứng", "Không biến chứng")))
+
+# 7.2 Tính toán số liệu (Trung vị và IQR)
+summary_air <- df_air %>%
+  group_by(GPB_factor) %>%
+  summarise(
+    median_air = median(AIR),
+    iqr_air = IQR(AIR)
+  ) %>%
+  mutate(
+    # Định dạng chuỗi văn bản giống hình gốc: ví dụ "8 (3)", "6 (2)"
+    # Dùng %.0f vì điểm AIR là số nguyên
+    label_text = sprintf("%.0f (%.0f)", median_air, iqr_air)
+  )
+
+# 7.3 Vẽ biểu đồ
+ggplot(df_air, aes(x = GPB_factor, y = AIR, fill = GPB_factor)) +
+  
+  # Vẽ thân Violin (màu viền xám mờ giống bản gốc)
+  geom_violin(trim = FALSE, alpha = 0.8, color = "darkgrey") +
+  
+  # Vẽ biểu đồ hộp (Boxplot) màu trắng lồng bên trong
+  geom_boxplot(width = 0.15, fill = "white", color = "black", 
+               outlier.shape = NA, fatten = 2) +
+  
+  # Chèn nhãn văn bản (Trung vị và IQR) nằm bên phải hộp
+  geom_text(data = summary_air,
+            aes(x = GPB_factor, y = median_air, label = label_text),
+            nudge_x = 0.12,     # Khoảng cách đẩy chữ sang phải
+            hjust = 0,          
+            size = 4, 
+            fontface = "bold") + 
+            
+  # Tùy chỉnh màu sắc (Sử dụng mã màu HEX giống 99% bản gốc)
+  scale_fill_manual(values = c("Có biến chứng" = "#ff9999", "Không biến chứng" = "#99ccff")) +
+  
+  # Tùy chỉnh trục Y (Chạy từ 2.5 đến 12.5 giống hình)
+  scale_y_continuous(breaks = seq(2.5, 12.5, by = 2.5), limits = c(1, 13)) +
+  
+  # Gắn nhãn trục
+  labs(x = "Tình trạng biến chứng", y = "Điểm lâm sàng (AIR)") +
+  
+  # Định dạng giao diện (Theme) tối giản
+  theme_minimal() +
+  theme(
+    legend.position = "none",             
+    panel.grid.major.x = element_blank(), 
+    panel.grid.minor = element_blank(),   
+    axis.title.x = element_text(fontface = "bold", margin = margin(t = 10)),
+    axis.title.y = element_text(fontface = "bold", margin = margin(r = 10)),
+    axis.text = element_text(color = "black", size = 11)
+  )
+```
+
+```{r}
+# ==============================================================
+# 8. VẼ BIỂU ĐỒ VIOLIN (ĐƯỜNG KÍNH RUỘT THỪA THEO TÌNH TRẠNG BIẾN CHỨNG)
+# ==============================================================
+
+# 8.1 Xử lý dữ liệu: Trích xuất biến dkruotthua và phân nhóm GPB
+df_dk <- data_clean %>%
+  filter(!is.na(GPB) & !is.na(dkruotthua)) %>% 
+  mutate(GPB_factor = factor(GPB, levels = c(1, 2), labels = c("Có biến chứng", "Không biến chứng")))
+
+# 8.2 Tính toán số liệu (Trung vị và IQR)
+summary_dk <- df_dk %>%
+  group_by(GPB_factor) %>%
+  summarise(
+    median_dk = median(dkruotthua),
+    iqr_dk = IQR(dkruotthua)
+  ) %>%
+  mutate(
+    # %.1f: Luôn hiện 1 chữ số thập phân cho Trung vị (vd: 12.7, 10.4)
+    # %g: Tự động bỏ số 0 thừa cho IQR (nếu là 3.0 sẽ hiện 3, nếu 3.6 vẫn giữ 3.6)
+    label_text = sprintf("%.1f (%g)", median_dk, iqr_dk)
+  )
+
+# 8.3 Vẽ biểu đồ
+ggplot(df_dk, aes(x = GPB_factor, y = dkruotthua, fill = GPB_factor)) +
+  
+  # Vẽ thân Violin
+  geom_violin(trim = FALSE, alpha = 0.8, color = "darkgrey") +
+  
+  # Vẽ biểu đồ hộp (Boxplot) lồng bên trong
+  # ĐIỂM NHẤN: Hiển thị giá trị ngoại lai (outlier) bằng các chấm tròn màu đỏ
+  geom_boxplot(width = 0.15, fill = "white", color = "black", 
+               outlier.color = "red", outlier.shape = 16, outlier.size = 1.5, fatten = 2) +
+  
+  # Chèn nhãn văn bản 
+  geom_text(data = summary_dk,
+            aes(x = GPB_factor, y = median_dk, label = label_text),
+            nudge_x = 0.12,
+            hjust = 0,          
+            size = 4, 
+            fontface = "bold") + 
+            
+  # Tùy chỉnh màu sắc (Giữ nguyên tone màu đỏ - xanh pastel)
+  scale_fill_manual(values = c("Có biến chứng" = "#ff9999", "Không biến chứng" = "#99ccff")) +
+  
+  # Tùy chỉnh trục Y (Chia vạch từ 5 đến 25)
+  scale_y_continuous(breaks = seq(5, 25, by = 5)) +
+  
+  # Gắn nhãn trục
+  labs(x = "Tình trạng biến chứng", y = "Đường kính ruột thừa (mm)") +
+  
+  # Định dạng giao diện tối giản
+  theme_minimal() +
+  theme(
+    legend.position = "none",             
+    panel.grid.major.x = element_blank(), 
+    panel.grid.minor = element_blank(),   
+    axis.title.x = element_text(fontface = "bold", margin = margin(t = 10)),
+    axis.title.y = element_text(fontface = "bold", margin = margin(r = 10)),
+    axis.text = element_text(color = "black", size = 11)
+  )
+```
+
+```{r roc_air, echo=TRUE, warning=FALSE, message=FALSE, fig.width=6, fig.height=6}
+# ==============================================================
+# 9. VẼ ĐƯỜNG CONG ROC CHO THANG ĐIỂM AIR (BIỂU ĐỒ 3.4)
+# ==============================================================
+library(pROC)
+library(ggplot2)
+
+# 9.1 Tạo đối tượng ROC (Tự động nhận diện hướng của biến GPB và AIR)
+roc_air <- roc(data_clean$GPB, data_clean$AIR, quiet = TRUE)
+
+# 9.2 Trích xuất dữ liệu tọa độ để vẽ bằng ggplot2
+roc_data <- data.frame(
+  FPR = 1 - roc_air$specificities,
+  TPR = roc_air$sensitivities
+)
+
+# Lấy giá trị AUC và tự động đổi dấu chấm thành dấu phẩy (vd: 0.760 -> 0,760)
+auc_val <- as.numeric(auc(roc_air))
+auc_text <- paste0("AUC: ", gsub("\\.", ",", sprintf("%.3f", auc_val)))
+
+# 9.3 Tính tọa độ chính xác của điểm cắt 6.5 để gắn dấu chấm đỏ
+coord_cutoff <- coords(roc_air, x = 6.5, input = "threshold", ret = c("specificity", "sensitivity"), transpose = FALSE)
+cutoff_fpr <- 1 - coord_cutoff$specificity[1]
+cutoff_tpr <- coord_cutoff$sensitivity[1]
+
+# 9.4 Vẽ đồ thị mô phỏng bản gốc
+ggplot(data = roc_data, aes(x = FPR, y = TPR)) +
+  
+  # Đường chéo tham chiếu màu xanh lá
+  geom_abline(intercept = 0, slope = 1, color = "#4daf4a", linewidth = 0.5) +
+  
+  # Đường cong ROC chính màu xanh dương
+  geom_line(color = "#377eb8", linewidth = 1) +
+  
+  # Chấm đỏ tại điểm cắt
+  geom_point(x = cutoff_fpr, y = cutoff_tpr, color = "red", size = 2.5) +
+  
+  # Chữ ghi chú điểm cắt màu đỏ (in nghiêng, đẩy xích xuống dưới một chút)
+  annotate("text", x = cutoff_fpr + 0.12, y = cutoff_tpr - 0.05, 
+           label = "Điểm cắt: > 6,5", color = "red", fontface = "italic", size = 4) +
+           
+  # Chữ ghi chú AUC ở giữa (in đậm)
+  annotate("text", x = 0.5, y = 0.4, 
+           label = auc_text, color = "black", fontface = "bold", size = 5) +
+           
+  # Ép khung tọa độ vuông vức (0.0 -> 1.0) và loại bỏ khoảng trắng thừa ở các mép
+  scale_x_continuous(breaks = seq(0, 1, by = 0.2), limits = c(0, 1), expand = c(0, 0)) +
+  scale_y_continuous(breaks = seq(0, 1, by = 0.2), limits = c(0, 1), expand = c(0, 0)) +
+  labs(x = "1 - Độ đặc hiệu", y = "Độ nhạy") +
+  
+  # Thiết lập giao diện nền xám, viền đen đặc trưng
+  theme_gray() +
+  theme(
+    panel.border = element_rect(color = "black", fill = NA, linewidth = 1),
+    axis.title.x = element_text(fontface = "bold", margin = margin(t = 10)),
+    axis.title.y = element_text(fontface = "bold", margin = margin(r = 10)),
+    axis.text = element_text(color = "black")
+  )
+```
+
+```{r roc_dkruotthua, echo=TRUE, warning=FALSE, message=FALSE, fig.width=6, fig.height=6}
+# ==============================================================
+# 10. VẼ ĐƯỜNG CONG ROC CHO ĐƯỜNG KÍNH RUỘT THỪA (BIỂU ĐỒ 3.5)
+# ==============================================================
+library(pROC)
+library(ggplot2)
+
+# 10.1 Tạo đối tượng ROC cho biến dkruotthua
+roc_dk <- roc(data_clean$GPB, data_clean$dkruotthua, quiet = TRUE)
+
+# 10.2 Trích xuất dữ liệu tọa độ để vẽ bằng ggplot2
+roc_data_dk <- data.frame(
+  FPR = 1 - roc_dk$specificities,
+  TPR = roc_dk$sensitivities
+)
+
+# Lấy giá trị AUC và tự động đổi dấu chấm thành dấu phẩy (vd: 0.710 -> 0,710)
+auc_val_dk <- as.numeric(auc(roc_dk))
+auc_text_dk <- paste0("AUC: ", gsub("\\.", ",", sprintf("%.3f", auc_val_dk)))
+
+# 10.3 Tính tọa độ chính xác của điểm cắt 11.5 để gắn dấu chấm đỏ
+coord_cutoff_dk <- coords(roc_dk, x = 11.5, input = "threshold", ret = c("specificity", "sensitivity"), transpose = FALSE)
+cutoff_fpr_dk <- 1 - coord_cutoff_dk$specificity[1]
+cutoff_tpr_dk <- coord_cutoff_dk$sensitivity[1]
+
+# 10.4 Vẽ đồ thị mô phỏng bản gốc
+ggplot(data = roc_data_dk, aes(x = FPR, y = TPR)) +
+  
+  # Đường chéo tham chiếu màu xanh lá
+  geom_abline(intercept = 0, slope = 1, color = "#4daf4a", linewidth = 0.5) +
+  
+  # Đường cong ROC chính màu xanh dương
+  geom_line(color = "#377eb8", linewidth = 1) +
+  
+  # Chấm đỏ tại điểm cắt
+  geom_point(x = cutoff_fpr_dk, y = cutoff_tpr_dk, color = "red", size = 2.5) +
+  
+  # Chữ ghi chú điểm cắt màu đỏ (in nghiêng, căn chỉnh vị trí cạnh dấu chấm)
+  annotate("text", x = cutoff_fpr_dk + 0.12, y = cutoff_tpr_dk - 0.05, 
+           label = "Điểm cắt: > 11,5", color = "red", fontface = "italic", size = 4) +
+           
+  # Chữ ghi chú AUC ở giữa (in đậm)
+  annotate("text", x = 0.5, y = 0.4, 
+           label = auc_text_dk, color = "black", fontface = "bold", size = 5) +
+           
+  # Ép khung tọa độ vuông vức (0.0 -> 1.0) và loại bỏ khoảng trắng thừa ở các mép
+  scale_x_continuous(breaks = seq(0, 1, by = 0.2), limits = c(0, 1), expand = c(0, 0)) +
+  scale_y_continuous(breaks = seq(0, 1, by = 0.2), limits = c(0, 1), expand = c(0, 0)) +
+  labs(x = "1 - Độ đặc hiệu", y = "Độ nhạy") +
+  
+  # Thiết lập giao diện nền xám, viền đen đặc trưng
+  theme_gray() +
+  theme(
+    panel.border = element_rect(color = "black", fill = NA, linewidth = 1),
+    axis.title.x = element_text(fontface = "bold", margin = margin(t = 10)),
+    axis.title.y = element_text(fontface = "bold", margin = margin(r = 10)),
+    axis.text = element_text(color = "black")
+  )
+```
+
+```{r roc_combine, echo=TRUE, warning=FALSE, message=FALSE, fig.width=10, fig.height=5}
+# ==============================================================
+# 11. VẼ ĐƯỜNG CONG ROC KÉP (BIỂU ĐỒ 3.6)
+# ==============================================================
+# Cài đặt tự động gói patchwork
+if(!require(patchwork)) install.packages("patchwork")
+
+library(pROC)
+library(ggplot2)
+library(patchwork) 
+
+# --------------------------------------------------------------
+# ĐỒ THỊ A: BỀ DÀY THÀNH RUỘT THỪA (dthanhruotthua)
+# --------------------------------------------------------------
+roc_rt <- roc(data_clean$GPB, data_clean$dthanhruotthua, quiet = TRUE)
+data_rt <- data.frame(FPR = 1 - roc_rt$specificities, TPR = roc_rt$sensitivities)
+auc_rt <- as.numeric(auc(roc_rt))
+auc_text_rt <- paste0("AUC: ", gsub("\\.", ",", sprintf("%.3f", auc_rt)))
+
+# Tọa độ điểm cắt 3.2
+coord_rt <- coords(roc_rt, x = 3.2, input = "threshold", ret = c("specificity", "sensitivity"), transpose = FALSE)
+fpr_rt <- 1 - coord_rt$specificity[1]
+tpr_rt <- coord_rt$sensitivity[1]
+
+plot_a <- ggplot(data = data_rt, aes(x = FPR, y = TPR)) +
+  geom_abline(intercept = 0, slope = 1, color = "#4daf4a", linewidth = 0.5) +
+  geom_line(color = "#377eb8", linewidth = 1) +
+  geom_point(x = fpr_rt, y = tpr_rt, color = "red", size = 2.5) +
+  annotate("text", x = fpr_rt + 0.1, y = tpr_rt - 0.05, label = "> 3,2", color = "red", fontface = "italic", size = 4) +
+  annotate("text", x = 0.5, y = 0.35, label = auc_text_rt, color = "black", fontface = "bold", size = 4.5) +
+  scale_x_continuous(breaks = seq(0, 1, by = 0.2), limits = c(0, 1), expand = c(0, 0)) +
+  scale_y_continuous(breaks = seq(0, 1, by = 0.2), limits = c(0, 1), expand = c(0, 0)) +
+  labs(title = "A. Bề dày thành ruột thừa", x = "1 - Độ đặc hiệu", y = "Độ nhạy") +
+  theme_gray() +
+  theme(
+    plot.title = element_text(face = "bold", hjust = 0.5, size = 10),
+    panel.border = element_rect(color = "black", fill = NA, linewidth = 1),
+    axis.title.x = element_text(fontface = "bold", margin = margin(t = 10)),
+    axis.title.y = element_text(fontface = "bold", margin = margin(r = 10)),
+    axis.text = element_text(color = "black")
+  )
+
+# --------------------------------------------------------------
+# ĐỒ THỊ B: BỀ DÀY THÀNH MANH TRÀNG (dmanhtrang)
+# --------------------------------------------------------------
+roc_mt <- roc(data_clean$GPB, data_clean$dmanhtrang, quiet = TRUE)
+data_mt <- data.frame(FPR = 1 - roc_mt$specificities, TPR = roc_mt$sensitivities)
+auc_mt <- as.numeric(auc(roc_mt))
+auc_text_mt <- paste0("AUC: ", gsub("\\.", ",", sprintf("%.3f", auc_mt)))
+
+# Tọa độ điểm cắt 7.2
+coord_mt <- coords(roc_mt, x = 7.2, input = "threshold", ret = c("specificity", "sensitivity"), transpose = FALSE)
+fpr_mt <- 1 - coord_mt$specificity[1]
+tpr_mt <- coord_mt$sensitivity[1]
+
+plot_b <- ggplot(data = data_mt, aes(x = FPR, y = TPR)) +
+  geom_abline(intercept = 0, slope = 1, color = "#4daf4a", linewidth = 0.5) +
+  geom_line(color = "#377eb8", linewidth = 1) +
+  geom_point(x = fpr_mt, y = tpr_mt, color = "red", size = 2.5) +
+  annotate("text", x = fpr_mt + 0.1, y = tpr_mt - 0.05, label = "> 7,2", color = "red", fontface = "italic", size = 4) +
+  annotate("text", x = 0.5, y = 0.35, label = auc_text_mt, color = "black", fontface = "bold", size = 4.5) +
+  scale_x_continuous(breaks = seq(0, 1, by = 0.2), limits = c(0, 1), expand = c(0, 0)) +
+  scale_y_continuous(breaks = seq(0, 1, by = 0.2), limits = c(0, 1), expand = c(0, 0)) +
+  labs(title = "B. Bề dày thành manh tràng", x = "1 - Độ đặc hiệu", y = "Độ nhạy") +
+  theme_gray() +
+  theme(
+    plot.title = element_text(face = "bold", hjust = 0.5, size = 10),
+    panel.border = element_rect(color = "black", fill = NA, linewidth = 1),
+    axis.title.x = element_text(fontface = "bold", margin = margin(t = 10)),
+    axis.title.y = element_text(fontface = "bold", margin = margin(r = 10)),
+    axis.text = element_text(color = "black")
+  )
+
+# --------------------------------------------------------------
+# GHÉP HAI ĐỒ THỊ SONG SONG
+# --------------------------------------------------------------
+plot_a + plot_b
+```
+
+```{r}
+# ==============================================================
+# 12. XUẤT BẢNG 3.1: ĐẶC ĐIỂM LÂM SÀNG VÀ XÉT NGHIỆM
+# ==============================================================
+# Tự động cài đặt gói gtsummary nếu máy chưa có
+if(!require(gtsummary)) install.packages("gtsummary")
+library(gtsummary)
+library(dplyr)
+
+# 12.1 Tiền xử lý dữ liệu: Đảo ngược GPB và gắn nhãn theo SPSS
+df_table31 <- data_clean %>%
+  select(GPB, gioi, non, dauhcp, sot, phanungdoi, soluongBC, phantramNEU, nguongcrp) %>%
+  
+  # BƯỚC QUAN TRỌNG THEO YÊU CẦU: Đảo ngược giá trị 2 thành 0 cho biến GPB
+  mutate(GPB = ifelse(GPB == 2, 0, GPB)) %>%
+  
+  mutate(
+    # Khai báo biến GPB với thứ tự 1 (Có) và 0 (Không)
+    GPB = factor(GPB, levels = c(1, 0), labels = c("Có biến chứng", "Không biến chứng")),
+    
+    # Các biến đặc điểm còn lại vẫn giữ nguyên giá trị 1, 2, 3... như khai báo trong SPSS
+    gioi = factor(gioi, levels = c(1, 2), labels = c("Nam", "Nữ")),
+    non = factor(non, levels = c(1, 2), labels = c("Nôn", "Không nôn")),
+    dauhcp = factor(dauhcp, levels = c(1, 2), labels = c("Đau", "Không đau")),
+    sot = factor(sot, levels = c(1, 2), labels = c("Sốt", "Không sốt")),
+    
+    # Các biến phân độ (Dựa theo Value Labels của SPSS)
+    phanungdoi = factor(phanungdoi, levels = c(1, 2, 3, 4), labels = c("Nhẹ", "Vừa", "Rõ", "Không")),
+    soluongBC = factor(soluongBC, levels = c(1, 2, 3), labels = c("10 - 14,9 K/mcL", "\u2265 15 K/mcL", "< 10 K/mcL")),
+    phantramNEU = factor(phantramNEU, levels = c(1, 2, 3), labels = c("70 - 84%", "\u2265 85%", "< 70%")),
+    nguongcrp = factor(nguongcrp, levels = c(1, 2, 3), labels = c("10 - 49 mg/l", "\u2265 50 mg/l", "< 10 mg/l"))
+  )
+
+# 12.2 Tạo bảng thống kê tự động bằng gtsummary (Đã mô phỏng 100% SPSS)
+table_31 <- df_table31 %>%
+  tbl_summary(
+    by = GPB,
+    label = list(
+      gioi ~ "Giới",
+      non ~ "Nôn ói",
+      dauhcp ~ "Đau hố chậu phải",
+      sot ~ "Sốt",
+      phanungdoi ~ "Phản ứng dội",
+      soluongBC ~ "Số lượng bạch cầu",
+      phantramNEU ~ "Phần trăm NEU",
+      nguongcrp ~ "Ngưỡng CRP"
+    ),
+    statistic = all_categorical() ~ "{n} ({p}%)", 
+    
+    # TINH CHỈNH 1: Ép hiển thị 1 chữ số thập phân cho phần trăm (VD: 49.1%)
+    digits = all_categorical() ~ c(0, 1), 
+    
+    missing = "no" 
+  ) %>%
+  
+  # TINH CHỈNH 2: Ép dùng Hiệu chỉnh Yates và giữ cố định 3 chữ số thập phân cho p-value
+  add_p(
+    test = all_categorical() ~ "chisq.test",
+    test.args = all_categorical() ~ list(correct = TRUE), # Bật hiệu chỉnh Yates
+    pvalue_fun = function(x) style_pvalue(x, digits = 3)  # Ép ra 0.111, 0.574...
+  ) %>% 
+  
+  # Định dạng lại các tiêu đề cột cho giống hệt mẫu Word
+  modify_header(
+    label = "**Đặc điểm**",
+    stat_1 = "**Có biến chứng**\n**(n={n})**\n**n (%)**",
+    stat_2 = "**Không biến chứng**\n**(n={n})**\n**n (%)**",
+    p.value = "**p***"
+  ) %>%
+  
+  # Thêm dòng ghi chú phía dưới cùng
+  modify_footnote(
+    p.value ~ "* p được tính toán bằng kiểm định Chi-bình phương hoặc kiểm định chính xác"
+  ) %>%
+  
+  # In đậm tên các biến chính
+  bold_labels()
+
+# Hiển thị bảng
+table_31
+```
+
+```{r}
+# ==============================================================
+# 13. XUẤT BẢNG 3.2: ĐẶC ĐIỂM CÁC CHỈ SỐ ĐỊNH LƯỢNG
+# ==============================================================
+library(gtsummary)
+library(dplyr)
+
+# 13.1 Tiền xử lý: Chọn biến định lượng và xử lý lại biến GPB
+df_table32 <- data_clean %>%
+  select(GPB, tuoi, crp) %>%
+  mutate(
+    # Ép biến chứng 2 về 0 để an toàn tuyệt đối
+    GPB = ifelse(GPB == 2, 0, GPB),
+    GPB = factor(GPB, levels = c(1, 0), labels = c("Có biến chứng", "Không biến chứng"))
+  )
+
+# 13.2 Tạo bảng thống kê định lượng
+table_32 <- df_table32 %>%
+  tbl_summary(
+    by = GPB,
+    label = list(
+      tuoi ~ "Tuổi (năm)",
+      crp ~ "Giá trị CRP (mg/l)"
+    ),
+    type = all_continuous() ~ "continuous", 
+    
+    # TINH CHỈNH 1: Ép hiển thị Trung vị và (IQR)
+    statistic = all_continuous() ~ "{median} ({IQR})",
+    
+    # TINH CHỈNH 2: Ép tất cả các số hiển thị đúng 1 chữ số thập phân (như bản gốc)
+    digits = all_continuous() ~ 1, 
+    
+    missing = "no"
+  ) %>%
+  
+  # TINH CHỈNH 3: Gọi kiểm định Mann-Whitney U (wilcox.test) và ép p-value 3 số thập phân
+  add_p(
+    test = all_continuous() ~ "wilcox.test", 
+    pvalue_fun = function(x) style_pvalue(x, digits = 3)
+  ) %>%
+  
+  # Việt hóa và định dạng các tiêu đề
+  modify_header(
+    label = "**Đặc điểm**",
+    stat_1 = "**Có biến chứng (n={n})**\n**Trung vị (IQR)**",
+    stat_2 = "**Không biến chứng (n={n})**\n**Trung vị (IQR)**",
+    p.value = "**p***"
+  ) %>%
+  
+  # Gắn ghi chú chân bảng
+  modify_footnote(
+    p.value ~ "*Dữ liệu được trình bày dưới dạng Trung vị (Khoảng tứ phân vị), sử dụng kiểm định Mann-Whitney U.*"
+  ) %>%
+  
+  # In đậm tên biến
+  bold_labels()
+
+# Hiển thị bảng
+table_32
+```
+
+```{r}
+# ==============================================================
+# 14. XUẤT BẢNG 3.3: HỆ SỐ KAPPA ĐÁNH GIÁ SỰ ĐỒNG THUẬN
+# ==============================================================
+# Tự động cài đặt các gói cần thiết nếu máy chưa có
+if(!require(haven)) install.packages("haven")
+if(!require(irr)) install.packages("irr")
+if(!require(vcd)) install.packages("vcd")
+if(!require(flextable)) install.packages("flextable")
+
+library(haven)
+library(irr)
+library(vcd)
+library(flextable)
+
+# 14.1 Đọc bộ dữ liệu riêng cho đánh giá Kappa
+data_icc <- read_sav("D:/NghienCuu/ICC.sav")
+
+# 14.2 Khai báo danh sách các cặp biến dựa theo ảnh SPSS (Đã sửa lỗi viết hoa chữ hachviem)
+var_list <- list(
+  c("TNM", "TNMCK2", "Mức độ thâm nhiễm mỡ"),
+  c("Matlientuc", "matlientucck2", "Mất liên tục thành ruột thừa"),
+  c("daymanhtrang", "daymanhtrangck2", "Dày thành manh tràng"),
+  c("Batthuockem", "batthuockemck2", "Giảm tăng quang thành ruột thừa"),
+  c("Khitrong", "khitrongck2", "Khí trong lòng ruột thừa"),
+  c("Khingoai", "khingoaick2", "Khí ngoài lòng ruột thừa"),
+  c("dichkhutru", "dichkhutruck2", "Dịch khu trú"),
+  c("dichtudo", "dichtudock2", "Dịch tự do"),
+  c("hachviem", "hachviemck2", "Hạch viêm"), # <-- Đã sửa chữ H thành h
+  c("Tacruot", "tacruotck2", "Tắc ruột"),
+  c("apxe", "apxeck2", "Áp xe"),
+  c("Soitrong", "soitrongck2", "Sỏi trong lòng ruột thừa"),
+  c("Soingoai", "soingoaick2", "Sỏi ngoài lòng ruột thừa")
+)
+
+# 14.3 Vòng lặp tính toán số liệu cho từng cặp biến
+results <- data.frame()
+
+for(item in var_list) {
+  v1 <- item[1]
+  v2 <- item[2]
+  name <- item[3]
+  
+  # Trích xuất dữ liệu của 2 người đọc, loại bỏ các ca missing (nếu có)
+  df_pair <- data_icc[, c(v1, v2)]
+  df_pair <- na.omit(df_pair)
+  
+  # A. Lấy giá trị Z và p-value từ gói irr (Thuật toán khớp với SPSS)
+  k_irr <- kappa2(df_pair)
+  z_val <- k_irr$statistic
+  p_val <- k_irr$p.value
+  
+  # B. Lấy Kappa và Sai số chuẩn (ASE) từ gói vcd
+  # Ép cùng levels để tạo ma trận vuông (tránh lỗi khi rater 2 thiếu 1 lựa chọn so với rater 1)
+  lvls <- sort(unique(c(df_pair[[1]], df_pair[[2]])))
+  f1 <- factor(df_pair[[1]], levels = lvls)
+  f2 <- factor(df_pair[[2]], levels = lvls)
+  tab <- table(f1, f2)
+  
+  k_vcd <- suppressWarnings(Kappa(tab))
+  kappa_val <- k_vcd$Unweighted[1]
+  se_val <- k_vcd$Unweighted[2]
+  
+  # C. Tính Khoảng tin cậy (KTC) 95%
+  ci_lower <- kappa_val - 1.96 * se_val
+  ci_upper <- kappa_val + 1.96 * se_val
+  if(ci_upper > 1) ci_upper <- 1 # Chặn KTC trên không vượt quá 1.00
+  
+  # D. Format hiển thị (Mô phỏng SPSS: đổi dấu chấm thành dấu phẩy)
+  kappa_str <- gsub("\\.", ",", sprintf("%.2f", kappa_val))
+  se_str <- gsub("\\.", ",", sprintf("%.2f", se_val))
+  ci_str <- gsub("\\.", ",", sprintf("[%0.2f - %0.2f]", ci_lower, ci_upper))
+  z_str <- gsub("\\.", ",", sprintf("%.2f", z_val))
+  p_str <- ifelse(p_val < 0.001, "<0,001", gsub("\\.", ",", sprintf("%.3f", p_val)))
+  
+  # Lưu vào bảng tổng
+  results <- rbind(results, data.frame(
+    DauHieu = name,
+    Kappa = kappa_str,
+    SE = se_str,
+    CI = ci_str,
+    Z = z_str,
+    p = p_str
+  ))
+}
+
+# 14.4 Vẽ bảng định dạng Word bằng flextable
+table_33 <- results %>%
+  flextable() %>%
+  
+  # Tùy chỉnh tiêu đề cột (sử dụng \n để xuống dòng như bản gốc)
+  set_header_labels(
+    DauHieu = "Dấu hiệu",
+    Kappa = "Giá trị\nKappa",
+    SE = "Sai số\nchuẩn",
+    CI = "KTC 95%",
+    Z = "Giá trị Z",
+    p = "p"
+  ) %>%
+  bold(part = "header") %>%
+  
+  # Căn lề: Cột dấu hiệu căn trái, các số liệu căn giữa
+  align(j = 1, align = "left", part = "all") %>%
+  align(j = 2:6, align = "center", part = "all") %>%
+  
+  # Điều chỉnh độ rộng cột cho thoáng
+  width(j = 1, width = 2.5) %>%
+  width(j = 2:6, width = 1) %>%
+  
+  # Kẻ khung chuẩn APA (chỉ có dòng ngang, không có dòng dọc)
+  theme_booktabs() %>%
+  
+  # Chèn ghi chú chân trang
+  add_footer_lines("Ghi chú: Mức độ đồng thuận của các dấu hiệu định tính được đánh giá qua hệ số Kappa (ước lượng bằng kiểm định Z).") %>%
+  
+  # Đồng bộ Font chữ và Size
+  font(fontname = "Times New Roman", part = "all") %>%
+  fontsize(size = 11, part = "all")
+
+# Hiển thị bảng
+table_33
+```
+
+```{r}
+# ==============================================================
+# 15. XUẤT BẢNG 3.4: HỆ SỐ TƯƠNG QUAN NỘI BỘ (ICC)
+# ==============================================================
+library(irr)
+library(flextable)
+
+# 15.1 Khai báo danh sách các cặp biến định lượng
+# Lưu ý: Tôi giả định biến bề dày thành ruột thừa bị che khuất là 'dthanhruotthua'
+var_list_icc <- list(
+  c("dkruotthua", "dkrtck2", "Đường kính ruột thừa"),
+  c("dthanhruotthua", "drtck2", "Bề dày thành ruột thừa"),
+  c("dmanhtrang", "dmtck2", "Bề dày thành manh tràng")
+)
+
+# 15.2 Vòng lặp tính toán ICC cho từng cặp biến
+results_icc <- data.frame()
+
+for(item in var_list_icc) {
+  v1 <- item[1]
+  v2 <- item[2]
+  name <- item[3]
+  
+  # Trích xuất dữ liệu của 2 người đọc
+  df_pair <- data_icc[, c(v1, v2)]
+  df_pair <- na.omit(df_pair)
+  
+  # Tính ICC đơn (Single Measures) 
+  # model="twoway" (2 người đọc cố định), type="agreement" (độ đồng thuận tuyệt đối)
+  icc_single <- icc(df_pair, model = "twoway", type = "agreement", unit = "single")
+  
+  # Tính ICC trung bình (Average Measures)
+  icc_avg <- icc(df_pair, model = "twoway", type = "agreement", unit = "average")
+  
+  # Format hiển thị: Đổi dấu chấm thành phẩy, giữ 2 chữ số thập phân
+  val_s <- gsub("\\.", ",", sprintf("%.2f", icc_single$value))
+  ci_s <- gsub("\\.", ",", sprintf("%.2f - %.2f", icc_single$lbound, icc_single$ubound))
+  
+  val_a <- gsub("\\.", ",", sprintf("%.2f", icc_avg$value))
+  ci_a <- gsub("\\.", ",", sprintf("%.2f - %.2f", icc_avg$lbound, icc_avg$ubound))
+  
+  # Lưu vào bảng tổng
+  results_icc <- rbind(results_icc, data.frame(
+    KiemDinh = name,
+    ICC_don = val_s,
+    KTC_don = ci_s,
+    ICC_tb = val_a,
+    KTC_tb = ci_a
+  ))
+}
+
+# 15.3 Vẽ bảng định dạng Word bằng flextable
+table_34 <- results_icc %>%
+  flextable() %>%
+  
+  # Tùy chỉnh tiêu đề cột
+  set_header_labels(
+    KiemDinh = "Kiểm định",
+    ICC_don = "ICC đơn",
+    KTC_don = "KTC 95%",
+    ICC_tb = "ICC trung\nbình",
+    KTC_tb = "KTC 95%"
+  ) %>%
+  bold(part = "header") %>%
+  
+  # Căn lề: Cột đầu căn trái, các số liệu căn giữa
+  align(j = 1, align = "left", part = "all") %>%
+  align(j = 2:5, align = "center", part = "all") %>%
+  
+  # Điều chỉnh độ rộng cột
+  width(j = 1, width = 2.2) %>%
+  width(j = 2:5, width = 1.2) %>%
+  
+  # Kẻ khung chuẩn luận văn (theme_booktabs)
+  theme_booktabs() %>%
+  
+  # Chèn ghi chú chân trang (Tôi bổ sung chữ "p < 0,001" bị khuất trong ảnh của bác sĩ)
+  add_footer_lines("Ghi chú: Sử dụng kết quả kiểm định F của các chỉ số ICC đều đạt mức ý nghĩa thống kê với p < 0,001.") %>%
+  italic(part = "footer") %>%
+  
+  # Đồng bộ Font chữ và Size
+  font(fontname = "Times New Roman", part = "all") %>%
+  fontsize(size = 11, part = "all")
+
+# Hiển thị bảng
+table_34
+```
+
+```{r}
+# ==============================================================
+# ==============================================================
+# 16. XUẤT BẢNG 3.5: ĐẶC ĐIỂM BỀ DÀY THÀNH RUỘT THỪA VÀ MANH TRÀNG
+# ==============================================================
+library(gtsummary)
+library(dplyr)
+library(flextable) # Gọi thêm thư viện flextable
+
+# 16.1 Tiền xử lý dữ liệu từ bộ data_clean (Nghiencuu.sav)
+df_table35 <- data_clean %>%
+  select(GPB, dthanhruotthua, dmanhtrang) %>%
+  mutate(
+    GPB = ifelse(GPB == 2, 0, GPB),
+    GPB = factor(GPB, levels = c(1, 0), labels = c("Có biến chứng", "Không biến chứng"))
+  )
+
+# 16.2 Tạo bảng thống kê
+table_35 <- df_table35 %>%
+  tbl_summary(
+    by = GPB,
+    label = list(
+      dthanhruotthua ~ "Bề dày thành ruột thừa (mm)",
+      dmanhtrang ~ "Bề dày thành manh tràng (mm)"
+    ),
+    type = all_continuous() ~ "continuous",
+    statistic = all_continuous() ~ "{median} ({IQR})",
+    digits = all_continuous() ~ 1,
+    missing = "no"
+  ) %>%
+  add_overall(
+    last = FALSE, 
+    col_label = "**Chung**\n**(n={N})**\n**Trung vị (IQR)**"
+  ) %>%
+  add_p(
+    test = all_continuous() ~ "wilcox.test",
+    pvalue_fun = function(x) style_pvalue(x, digits = 3)
+  ) %>%
+  modify_header(
+    label = "**Đặc điểm**",
+    stat_1 = "**Có biến chứng**\n**(n={n})**\n**Trung vị (IQR)**",
+    stat_2 = "**Không biến chứng**\n**(n={n})**\n**Trung vị (IQR)**",
+    p.value = "**p**"
+  ) %>%
+  modify_footnote(
+    all_stat_cols() ~ NA, 
+    p.value ~ "Ghi chú: Dữ liệu được trình bày dưới dạng Trung vị (Khoảng tứ phân vị), sử dụng kiểm định Mann-Whitney U."
+  ) %>%
+  # XỬ LÝ LỖI Ở ĐÂY:
+  bold_labels() %>%      
+  as_flex_table() %>%     
+  italic(part = "footer") 
+
+# Hiển thị bảng
+table_35
+```
+
+```{r}
+# ==============================================================
+# 17. XUẤT BẢNG: ĐẶC ĐIỂM CÁC DẤU HIỆU CẮT LỚP VI TÍNH
+# ==============================================================
+library(gtsummary)
+library(dplyr)
+
+# 17.1 Tiền xử lý dữ liệu: "Thiết quân luật" lại toàn bộ dữ liệu REDCap
+df_table_clvt <- data_clean %>%
+  select(GPB, Thamnhiemmo, nguongtnm, Matlientuc, Batthuockem, 
+         Khitrong, Khingoai, dichkhutru, dichtudo, hachviem, Tacruot) %>%
+  mutate(
+    # Đưa biến GPB về chuẩn 1-0
+    GPB = ifelse(GPB %in% c(1), 1, 0),
+    GPB = factor(GPB, levels = c(1, 0), labels = c("Có biến chứng", "Không biến chứng")),
+    
+    # Xử lý Thâm nhiễm mỡ (Giữ nguyên 1, 2, 3 như ảnh chụp SPSS. Tôi dùng chữ "Toàn chu vi" để khớp với Word)
+    Thamnhiemmo = factor(Thamnhiemmo, levels = c(1, 2, 3), labels = c("Một phần", "Toàn chu vi", "Không")),
+    
+    # Xử lý Ngưỡng thâm nhiễm mỡ
+    nguongtnm = ifelse(nguongtnm %in% c(1), 1, 2),
+    nguongtnm = factor(nguongtnm, levels = c(1, 2), labels = c("Toàn chu vi", "Còn lại")),
+    
+    # PHÉP THUẬT: Ép toàn bộ các biến Có/Không (số 0, số 2, hoặc bị trống) về chuẩn số 2
+    across(c(Matlientuc, Batthuockem, Khitrong, Khingoai, dichkhutru, dichtudo, hachviem, Tacruot), 
+           ~ ifelse(. %in% 1, 1, 2)),
+           
+    # Gắn nhãn hàng loạt cho tất cả các biến trên
+    across(c(Matlientuc, Batthuockem, Khitrong, Khingoai, dichkhutru, dichtudo, hachviem, Tacruot), 
+           ~ factor(., levels = c(1, 2), labels = c("Có", "Không")))
+  )
+
+# 17.2 Tạo bảng thống kê "khổng lồ"
+table_clvt <- df_table_clvt %>%
+  tbl_summary(
+    by = GPB,
+    label = list(
+      Thamnhiemmo ~ "Thâm nhiễm mỡ",
+      nguongtnm ~ "Mức độ thâm nhiễm mỡ",
+      Matlientuc ~ "Mất liên tục thành",
+      Batthuockem ~ "Giảm tăng quang thành ruột",
+      Khitrong ~ "Khí trong",
+      Khingoai ~ "Khí ngoài",
+      dichkhutru ~ "Dịch khu trú",
+      dichtudo ~ "Dịch tự do",
+      hachviem ~ "Hạch viêm",
+      Tacruot ~ "Tắc ruột non"
+    ),
+    statistic = all_categorical() ~ "{n} ({p}%)",
+    digits = all_categorical() ~ c(0, 1), 
+    missing = "no" # Sau khi đã "quét sạch" lỗi thì sẽ không còn dòng missing nữa
+  ) %>%
+  add_overall(
+    last = FALSE, 
+    col_label = "**Chung (n={N})**\n**n (%)**"
+  ) %>%
+  add_p(
+    test = all_categorical() ~ "chisq.test",
+    test.args = all_categorical() ~ list(correct = TRUE),
+    pvalue_fun = function(x) style_pvalue(x, digits = 3)
+  ) %>%
+  modify_header(
+    label = "**Đặc điểm**",
+    stat_1 = "**Có biến chứng**\n**(n={n})**\n**n (%)**",
+    stat_2 = "**Không biến chứng**\n**(n={n})**\n**n (%)**",
+    p.value = "**p***"
+  ) %>%
+  modify_footnote(
+    p.value ~ "* p được tính bằng kiểm định Chi-bình phương hoặc kiểm định chính xác Fisher"
+  ) %>%
+  bold_labels()
+
+# Hiển thị bảng
+table_clvt
+```
+```{r}
+# ==============================================================
+# 18. XUẤT BẢNG: PHÂN TÍCH HỒI QUY LOGISTIC ĐƠN BIẾN (GỘP 4 BIẾN)
+# ==============================================================
+library(gtsummary)
+library(dplyr)
+library(flextable)
+
+# 18.1 Tiền xử lý dữ liệu: Tự động cắt ngưỡng từ biến định lượng gốc
+df_uv_model <- data_clean %>%
+  # Chọn các biến định lượng gốc thay vì biến ngưỡng cũ của SPSS
+  select(GPB, nguongAIR, dkruotthua, dthanhruotthua, dmanhtrang) %>% 
+  mutate(
+    # Biến Outcome
+    GPB_factor = factor(ifelse(GPB %in% c(1), 1, 0), levels = c(1, 0), labels = c("Có biến chứng", "Không biến chứng")),
+    GPB_num = ifelse(GPB %in% c(1), 1, 0),
+    
+    # Biến Điểm AIR (Dùng biến cũ vì nó đã chính xác)
+    AIR_cat = factor(ifelse(nguongAIR %in% c(1), "Có", "Không"), levels = c("Không", "Có")),
+    
+    # BƯỚC ĐỘT PHÁ: Tự động ép cắt ngưỡng 3 biến định lượng chuẩn xác 100%
+    DKRT_cat = factor(ifelse(dkruotthua > 11.5, "Có", "Không"), levels = c("Không", "Có")),
+    DTRT_cat = factor(ifelse(dthanhruotthua > 3.2, "Có", "Không"), levels = c("Không", "Có")),
+    MT_cat = factor(ifelse(dmanhtrang > 7.2, "Có", "Không"), levels = c("Không", "Có"))
+  )
+
+# 18.2 Lập Bảng A: Đếm Tần số n (%)
+t1_counts <- df_uv_model %>%
+  select(GPB_factor, AIR_cat, DKRT_cat, DTRT_cat, MT_cat) %>%
+  tbl_summary(
+    by = GPB_factor,
+    type = list(AIR_cat ~ "dichotomous", DKRT_cat ~ "dichotomous", DTRT_cat ~ "dichotomous", MT_cat ~ "dichotomous"),
+    value = list(AIR_cat ~ "Có", DKRT_cat ~ "Có", DTRT_cat ~ "Có", MT_cat ~ "Có"),
+    label = list(
+      AIR_cat ~ "Điểm AIR \u2265 7",
+      DKRT_cat ~ "Đường kính > 11,5 mm",
+      DTRT_cat ~ "Dày thành ruột thừa > 3,2 mm",
+      MT_cat ~ "Dày thành manh tràng > 7,2 mm"
+    ),
+    statistic = all_categorical() ~ "{n} ({p}%)",
+    digits = all_categorical() ~ c(0, 1),
+    missing = "no"
+  )
+
+# 18.3 Lập Bảng B: Chạy Hồi quy Logistic Đơn biến 
+t2_uvreg <- df_uv_model %>%
+  select(GPB_num, AIR_cat, DKRT_cat, DTRT_cat, MT_cat) %>%
+  tbl_uvregression(
+    method = glm,
+    y = GPB_num,
+    method.args = list(family = binomial),
+    exponentiate = TRUE, 
+    hide_n = TRUE,
+    show_single_row = c(AIR_cat, DKRT_cat, DTRT_cat, MT_cat), 
+    label = list(
+      AIR_cat ~ "Điểm AIR \u2265 7",
+      DKRT_cat ~ "Đường kính > 11,5 mm",
+      DTRT_cat ~ "Dày thành ruột thừa > 3,2 mm",
+      MT_cat ~ "Dày thành manh tràng > 7,2 mm"
+    ),
+    pvalue_fun = function(x) style_pvalue(x, digits = 3)
+  )
+
+# 18.4 Ghép 2 bảng và Định dạng
+table_combined <- tbl_merge(
+  tbls = list(t1_counts, t2_uvreg),
+  tab_spanner = FALSE
+) %>%
+  modify_header(
+    label = "**Biến số**",
+    stat_1_1 = "**Có biến chứng**\n**(n={n}) n (%)**",
+    stat_2_1 = "**Không biến chứng**\n**(n={n}) n (%)**",
+    estimate_2 = "**OR**",
+    ci_2 = "**KTC 95%**",
+    p.value_2 = "**p**"
+  ) %>%
+  modify_footnote(
+    everything() ~ NA, 
+    p.value_2 ~ "Ghi chú: Giá trị OR, KTC 95% và p được ước lượng từ mô hình hồi quy logistic đơn biến bằng thuật toán Profile Likelihood."
+  ) %>%
+  bold_labels() %>%
+  as_flex_table() %>%
+  italic(part = "footer")
+
+# Hiển thị bảng
+table_combined
+```
+```{r}
+# ==============================================================
+# 19. XUẤT BẢNG 3.11: HỒI QUY ĐƠN BIẾN (CT-SCAN) KẾT HỢP FIRTH
+# ==============================================================
+# Tải gói chuyên dụng cho hồi quy Firth
+if(!require(logistf)) install.packages("logistf")
+
+library(gtsummary)
+library(dplyr)
+library(flextable)
+library(logistf) 
+
+# 19.1 Tiền xử lý dữ liệu: Đồng bộ hóa toàn bộ thành nhóm "Có" / "Không"
+df_uv_ct <- data_clean %>%
+  select(GPB, tttnm, nguongtnm, Khitrong, Soitrong, hachviem, dichkhutru, dichtudo) %>%
+  mutate(
+    GPB_factor = factor(ifelse(GPB %in% c(1), 1, 0), levels = c(1, 0), labels = c("Có biến chứng", "Không biến chứng")),
+    GPB_num = ifelse(GPB %in% c(1), 1, 0),
+    
+    tttnm_cat = factor(ifelse(tttnm %in% c(1), "Có", "Không"), levels = c("Không", "Có")),
+    nguongtnm_cat = factor(ifelse(nguongtnm %in% c(1), "Có", "Không"), levels = c("Không", "Có")),
+    Khitrong_cat = factor(ifelse(Khitrong %in% c(1), "Có", "Không"), levels = c("Không", "Có")),
+    Soitrong_cat = factor(ifelse(Soitrong %in% c(1), "Có", "Không"), levels = c("Không", "Có")),
+    hachviem_cat = factor(ifelse(hachviem %in% c(1), "Có", "Không"), levels = c("Không", "Có")),
+    dichkhutru_cat = factor(ifelse(dichkhutru %in% c(1), "Có", "Không"), levels = c("Không", "Có")),
+    dichtudo_cat = factor(ifelse(dichtudo %in% c(1), "Có", "Không"), levels = c("Không", "Có"))
+  )
+
+# 19.2 Lập Bảng A: Đếm Tần số n (%)
+t1_counts_ct <- df_uv_ct %>%
+  select(GPB_factor, tttnm_cat, nguongtnm_cat, Khitrong_cat, Soitrong_cat, hachviem_cat, dichkhutru_cat, dichtudo_cat) %>%
+  tbl_summary(
+    by = GPB_factor,
+    type = list(tttnm_cat ~ "dichotomous", nguongtnm_cat ~ "dichotomous", Khitrong_cat ~ "dichotomous", 
+                Soitrong_cat ~ "dichotomous", hachviem_cat ~ "dichotomous", dichkhutru_cat ~ "dichotomous", dichtudo_cat ~ "dichotomous"),
+    value = list(tttnm_cat ~ "Có", nguongtnm_cat ~ "Có", Khitrong_cat ~ "Có", 
+                 Soitrong_cat ~ "Có", hachviem_cat ~ "Có", dichkhutru_cat ~ "Có", dichtudo_cat ~ "Có"),
+    label = list(
+      tttnm_cat ~ "Tình trạng thâm nhiễm mỡ*",
+      nguongtnm_cat ~ "Thâm nhiễm mỡ toàn bộ chu vi",
+      Khitrong_cat ~ "Khí trong lòng ruột thừa",
+      Soitrong_cat ~ "Sỏi trong lòng ruột thừa",
+      hachviem_cat ~ "Hạch viêm",
+      dichkhutru_cat ~ "Dịch khu trú quanh ruột thừa",
+      dichtudo_cat ~ "Dịch tự do ổ bụng"
+    ),
+    statistic = all_categorical() ~ "{n} ({p}%)",
+    digits = all_categorical() ~ c(0, 1),
+    missing = "no"
+  )
+
+# 19.3 Lập Bảng B1: HỒI QUY FIRTH cho "Tình trạng thâm nhiễm mỡ" (Thay máu thuật toán)
+t2_firth <- df_uv_ct %>%
+  select(GPB_num, tttnm_cat) %>%
+  tbl_uvregression(
+    method = logistf, # Gọi trực tiếp thuật toán Firth từ gói logistf
+    y = GPB_num,
+    exponentiate = TRUE, 
+    hide_n = TRUE,
+    show_single_row = everything(),
+    label = list(tttnm_cat ~ "Tình trạng thâm nhiễm mỡ*")
+  )
+
+# 19.4 Lập Bảng B2: HỒI QUY THÔNG THƯỜNG cho 6 biến còn lại
+t2_glm <- df_uv_ct %>%
+  select(GPB_num, nguongtnm_cat, Khitrong_cat, Soitrong_cat, hachviem_cat, dichkhutru_cat, dichtudo_cat) %>%
+  tbl_uvregression(
+    method = glm,
+    y = GPB_num,
+    method.args = list(family = binomial),
+    exponentiate = TRUE, 
+    hide_n = TRUE,
+    show_single_row = everything(),
+    label = list(
+      nguongtnm_cat ~ "Thâm nhiễm mỡ toàn bộ chu vi",
+      Khitrong_cat ~ "Khí trong lòng ruột thừa",
+      Soitrong_cat ~ "Sỏi trong lòng ruột thừa",
+      hachviem_cat ~ "Hạch viêm",
+      dichkhutru_cat ~ "Dịch khu trú quanh ruột thừa",
+      dichtudo_cat ~ "Dịch tự do ổ bụng"
+    ),
+    pvalue_fun = function(x) style_pvalue(x, digits = 3)
+  )
+
+# 19.5 Chồng Bảng B1 lên B2, sau đó Ghép với Bảng A
+t2_combined <- tbl_stack(list(t2_firth, t2_glm))
+
+table_311 <- tbl_merge(
+  tbls = list(t1_counts_ct, t2_combined),
+  tab_spanner = FALSE
+) %>%
+  modify_header(
+    label = "**Dấu hiệu hình ảnh trên CLVT**",
+    stat_1_1 = "**Có biến chứng**\n**(n={n}) n (%)**",
+    stat_2_1 = "**Không biến chứng**\n**(n={n}) n (%)**",
+    estimate_2 = "**OR**",
+    ci_2 = "**KTC 95%**"
+  ) %>%
+  # Xóa bỏ các cột CI tiếng Anh thừa thãi (nếu có)
+  modify_column_hide(columns = any_of(c("ci_1", "ci_2_1", "ci_1_2", "conf.low", "conf.high", "p.value_1"))) %>%
+  
+  # Việt hóa tiêu đề p-value
+  modify_header(p.value_2 = "**p**") %>%
+  modify_footnote(
+    everything() ~ NA, 
+    p.value_2 ~ "*Giá trị OR và KTC 95% của biến 'Tình trạng thâm nhiễm mỡ' được ước lượng bằng phương pháp hồi quy Firth. Các biến số còn lại được ước lượng bằng mô hình hồi quy logistic nhị phân thông thường."
+  ) %>%
+  bold_labels() %>%
+  as_flex_table() %>%
+  italic(part = "footer")
+
+# Hiển thị bảng
+table_311
+```
+```{r}
+# ==============================================================
+# 20. XUẤT BẢNG 3.12: HỒI QUY ĐƠN BIẾN & ĐỘ NHẠY, ĐỘ ĐẶC HIỆU
+# ==============================================================
+library(dplyr)
+library(logistf)
+library(flextable)
+
+# 20.1 Tiền xử lý dữ liệu: Đưa toàn bộ về chuẩn 1 (Có), 0 (Không) để thuật toán không bị nhiễu
+df_b312 <- data_clean %>%
+  select(GPB, Batthuockem, Matlientuc, apxe, Khingoai, Tacruot, Soingoai) %>%
+  mutate(
+    # Outcome
+    GPB = ifelse(GPB %in% c(1), 1, 0),
+    # Các dấu hiệu đặc hiệu
+    Batthuockem = ifelse(Batthuockem %in% c(1), 1, 0),
+    Matlientuc = ifelse(Matlientuc %in% c(1), 1, 0),
+    apxe = ifelse(apxe %in% c(1), 1, 0),
+    Khingoai = ifelse(Khingoai %in% c(1), 1, 0),
+    Tacruot = ifelse(Tacruot %in% c(1), 1, 0),
+    Soingoai = ifelse(Soingoai %in% c(1), 1, 0)
+  )
+
+# 20.2 Khai báo danh sách biến và gán thuật toán tương ứng
+vars <- c("Batthuockem", "Matlientuc", "apxe", "Khingoai", "Tacruot", "Soingoai")
+names <- c("Giảm tăng quang\nthành ruột thừa*", 
+           "Mất liên tục\nthành ruột thừa*",
+           "Áp xe quanh\nruột thừa**", 
+           "Khí ngoài lòng\nruột thừa*",
+           "Tắc ruột non**", 
+           "Sỏi ngoài\nlòng ruột thừa**")
+models <- c("glm", "glm", "firth", "glm", "firth", "firth") # Khai báo AI tự chọn mô hình
+
+results <- data.frame()
+
+# 20.3 VÒNG LẶP TỰ ĐỘNG XỬ LÝ DỮ LIỆU
+for (i in 1:6) {
+  v <- vars[i]
+  m_type <- models[i]
+  name <- names[i]
+  
+  # --- BƯỚC 1: Tính Độ nhạy (Sens) và Độ đặc hiệu (Spec) từ bảng 2x2 ---
+  tp <- sum(df_b312[[v]] == 1 & df_b312$GPB == 1, na.rm = TRUE) # True Positive
+  fn <- sum(df_b312[[v]] == 0 & df_b312$GPB == 1, na.rm = TRUE) # False Negative
+  tn <- sum(df_b312[[v]] == 0 & df_b312$GPB == 0, na.rm = TRUE) # True Negative
+  fp <- sum(df_b312[[v]] == 1 & df_b312$GPB == 0, na.rm = TRUE) # False Positive
+  
+  sens <- (tp / (tp + fn)) * 100
+  spec <- (tn / (tn + fp)) * 100
+  
+  # --- BƯỚC 2: Chạy Hồi quy ---
+  if (m_type == "glm") {
+    # Logistic thông thường (Dùng Wald CI để khớp 100% với SPSS cũ của bác sĩ)
+    fit <- glm(as.formula(paste("GPB ~", v)), data = df_b312, family = binomial)
+    coef_val <- summary(fit)$coefficients[2, 1]
+    se_val <- summary(fit)$coefficients[2, 2]
+    
+    or_val <- exp(coef_val)
+    ci_l <- exp(coef_val - 1.96 * se_val) 
+    ci_u <- exp(coef_val + 1.96 * se_val)
+    p_val <- summary(fit)$coefficients[2, 4]
+    
+  } else {
+    # Hồi quy phạt Firth
+    fit <- logistf(as.formula(paste("GPB ~", v)), data = df_b312)
+    or_val <- exp(fit$coefficients[2])
+    ci_l <- exp(fit$ci.lower[2])
+    ci_u <- exp(fit$ci.upper[2])
+    p_val <- fit$prob[2]
+  }
+  
+  # --- BƯỚC 3: Ép định dạng thập phân chuẩn Việt Nam (dấu phẩy) ---
+  or_str <- gsub("\\.", ",", sprintf("%.2f", or_val))
+  ci_str <- paste0(gsub("\\.", ",", sprintf("%.2f", ci_l)), " - ", gsub("\\.", ",", sprintf("%.2f", ci_u)))
+  p_str <- ifelse(p_val < 0.001, "< 0,001", gsub("\\.", ",", sprintf("%.3f", p_val)))
+  sens_str <- gsub("\\.", ",", sprintf("%.1f", sens))
+  spec_str <- gsub("\\.", ",", sprintf("%.1f", spec))
+  
+  # Lưu từng dòng vào bảng tổng
+  results <- rbind(results, data.frame(
+    DacDiem = name, OR = or_str, KTC = ci_str, p = p_str, Sens = sens_str, Spec = spec_str
+  ))
+}
+
+# 20.4 Vẽ bảng định dạng chuẩn luận văn với Flextable
+table_312 <- results %>%
+  flextable() %>%
+  set_header_labels(
+    DacDiem = "Đặc điểm",
+    OR = "OR",
+    KTC = "KTC 95%",
+    p = "p",
+    Sens = "Độ nhạy\n(%)***",
+    Spec = "Độ đặc hiệu\n(%)***"
+  ) %>%
+  bold(part = "header") %>%
+  
+  # Căn lề: Cột đầu căn trái, các số liệu căn giữa
+  align(j = 1, align = "left", part = "all") %>%
+  align(j = 2:6, align = "center", part = "all") %>%
+  
+  # Chỉnh độ rộng cột cho cân đối
+  width(j = 1, width = 1.8) %>%
+  width(j = 2:6, width = 1.0) %>%
+  
+  # Kẻ khung chuẩn sách giáo khoa
+  theme_booktabs() %>%
+  
+  # Chèn đầy đủ 3 dòng ghi chú theo đúng ảnh gốc
+  add_footer_lines(c(
+    "*Các giá trị được ước lượng từ mô hình hồi quy logistic nhị phân thông thường.",
+    "**Các giá trị được ước lượng từ phương pháp hồi quy Firth.",
+    "***Giá trị độ nhạy và độ đặc hiệu được tính toán thông qua bảng phân loại chéo 2x2."
+  )) %>%
+  italic(part = "footer") %>%
+  
+  # Đồng bộ Font chữ
+  font(fontname = "Times New Roman", part = "all") %>%
+  fontsize(size = 11, part = "all")
+
+# Hiển thị bảng
+table_312
+```
+```{r}
+# ==============================================================
+# 21. XUẤT BẢNG 3.14: KIỂM TRA ĐA CỘNG TUYẾN (HỆ SỐ VIF)
+# ==============================================================
+# Cài đặt gói car nếu chưa có
+if(!require(car)) install.packages("car")
+
+library(dplyr)
+library(car)
+library(flextable)
+
+# 21.1 Tiền xử lý dữ liệu: Chuẩn bị các biến cho 2 mô hình
+df_vif <- data_clean %>%
+  mutate(
+    # ĐÃ SỬA LỖI Ở ĐÂY: Dùng biến nguongtuoi (Bắt mã 1 = >= 45 tuổi, còn lại về 0)
+    Tuoi_cat = factor(ifelse(nguongtuoi == 1, 1, 0)), 
+    
+    # Chuẩn bị các biến định tính cho Mô hình 2
+    AIR_cat = factor(ifelse(nguongAIR %in% c(1), 1, 0)),
+    DKRT_cat = factor(ifelse(dkruotthua > 11.5, 1, 0)),
+    MT_cat = factor(ifelse(dmanhtrang > 7.2, 1, 0)),
+    Soitrong_cat = factor(ifelse(Soitrong %in% c(1), 1, 0)),
+    Khitrong_cat = factor(ifelse(Khitrong %in% c(1), 1, 0)),
+    nguongtnm_cat = factor(ifelse(nguongtnm %in% c(1), 1, 0)),
+    dichtudo_cat = factor(ifelse(dichtudo %in% c(1), 1, 0)),
+    dichkhutru_cat = factor(ifelse(dichkhutru %in% c(1), 1, 0)),
+    hachviem_cat = factor(ifelse(hachviem %in% c(1), 1, 0)),
+    
+    # Biến phụ thuộc ảo để chạy hàm VIF
+    GPB_num = ifelse(GPB %in% c(1), 1, 0)
+  )
+
+# 21.2 Chạy 2 mô hình hồi quy tuyến tính phụ để tính VIF
+# Mô hình 1: Định lượng
+mod1 <- lm(GPB_num ~ AIR + dkruotthua + dmanhtrang, data = df_vif)
+vif1 <- vif(mod1)
+
+# Mô hình 2: Định tính
+mod2 <- lm(GPB_num ~ Tuoi_cat + AIR_cat + DKRT_cat + MT_cat + 
+             Soitrong_cat + Khitrong_cat + nguongtnm_cat + 
+             dichtudo_cat + dichkhutru_cat + hachviem_cat, data = df_vif)
+vif2 <- vif(mod2)
+
+# Hàm phụ trợ format số có dấu phẩy
+format_vif <- function(x) gsub("\\.", ",", sprintf("%.2f", x))
+
+# 21.3 Lắp ráp kết quả vào một bảng duy nhất
+res_vif <- data.frame(
+  Bien = c(
+    "Mô hình 1: Các biến số định lượng",
+    "Điểm AIR",
+    "Đường kính ruột thừa",
+    "Bề dày thành manh tràng",
+    "Mô hình 2: Các biến số định tính",
+    "Tuổi \u2265 45",
+    "Điểm AIR \u2265 7 điểm",
+    "Đường kính ruột thừa > 11,5 mm",
+    "Bề dày thành manh tràng > 7,2 mm",
+    "Sỏi trong lòng ruột thừa",
+    "Khí trong lòng ruột thừa",
+    "Thâm nhiễm mỡ toàn bộ chu vi",
+    "Dịch tự do ổ bụng",
+    "Dịch khu trú quanh ruột thừa",
+    "Hạch viêm"
+  ),
+  VIF = c(
+    "", # Dòng tiêu đề không có VIF
+    format_vif(vif1["AIR"]),
+    format_vif(vif1["dkruotthua"]),
+    format_vif(vif1["dmanhtrang"]),
+    "", # Dòng tiêu đề không có VIF
+    format_vif(vif2["Tuoi_cat"]),
+    format_vif(vif2["AIR_cat"]),
+    format_vif(vif2["DKRT_cat"]),
+    format_vif(vif2["MT_cat"]),
+    format_vif(vif2["Soitrong_cat"]),
+    format_vif(vif2["Khitrong_cat"]),
+    format_vif(vif2["nguongtnm_cat"]),
+    format_vif(vif2["dichtudo_cat"]),
+    format_vif(vif2["dichkhutru_cat"]),
+    format_vif(vif2["hachviem_cat"])
+  )
+)
+
+# 21.4 Vẽ bảng Flextable chuẩn định dạng Word
+table_314 <- flextable(res_vif) %>%
+  set_header_labels(Bien = "Biến số độc lập", VIF = "Hệ số VIF*") %>%
+  bold(part = "header") %>%
+  
+  # Căn lề
+  align(j = 1, align = "left", part = "all") %>%
+  align(j = 2, align = "center", part = "all") %>%
+  
+  # ĐIỂM NHẤN TRÌNH BÀY: 
+  # In nghiêng 2 dòng tiêu đề Mô hình
+  italic(i = c(1, 5), j = 1) %>%
+  # Thụt lề (indent) các biến số con vào trong 20px cho đẹp mắt
+  padding(i = c(2:4, 6:15), j = 1, padding.left = 20) %>%
+  
+  # Chỉnh độ rộng
+  width(j = 1, width = 3.5) %>%
+  width(j = 2, width = 1.2) %>%
+  
+  # Giao diện chuẩn
+  theme_booktabs() %>%
+  add_footer_lines("* VIF được tính toán thông qua mô hình hồi quy tuyến tính phụ") %>%
+  italic(part = "footer") %>%
+  font(fontname = "Times New Roman", part = "all") %>%
+  fontsize(size = 11, part = "all")
+
+# Hiển thị
+table_314
+```
+
+```{r}
+# ==============================================================
+# KIỂM TRA GIẢ ĐỊNH TUYẾN TÍNH (BOX-TIDWELL TEST)
+# ==============================================================
+# Thuật toán: Tạo biến tương tác giữa biến gốc và log tự nhiên của chính nó
+df_box <- data_clean %>%
+  mutate(
+    GPB_num = ifelse(GPB %in% c(1), 1, 0),
+    # Tạo các biến log
+    log_AIR = AIR * log(AIR + 0.001), # Cộng lượng nhỏ tránh log(0) nếu có
+    log_dk = dkruotthua * log(dkruotthua),
+    log_mt = dmanhtrang * log(dmanhtrang)
+  )
+
+# Chạy mô hình kiểm tra
+box_tidwell_model <- glm(GPB_num ~ AIR + log_AIR + 
+                                   dkruotthua + log_dk + 
+                                   dmanhtrang + log_mt, 
+                         data = df_box, family = binomial)
+
+# Xem kết quả
+summary(box_tidwell_model)
+```
+```{r}
+# ==============================================================
+# 22. XUẤT BẢNG 3.15: HỒI QUY LOGISTIC ĐA BIẾN (DỌN SẠCH GIAO DIỆN)
+# ==============================================================
+library(dplyr)
+library(gtsummary)
+library(flextable)
+
+# 22.1 Tiền xử lý dữ liệu
+df_mv1 <- data_clean %>%
+  select(GPB, dichkhutru, nguongtnm, AIR, hachviem, Khitrong, dichtudo, nguongtuoi, Soitrong, dkruotthua, dmanhtrang) %>%
+  mutate(
+    GPB_num = ifelse(GPB %in% c(1), 1, 0),
+    dichkhutru_cat = factor(ifelse(dichkhutru %in% c(1), "Có", "Không"), levels = c("Không", "Có")),
+    nguongtnm_cat  = factor(ifelse(nguongtnm %in% c(1), "Có", "Không"), levels = c("Không", "Có")),
+    hachviem_cat   = factor(ifelse(hachviem %in% c(1), "Có", "Không"), levels = c("Không", "Có")),
+    Khitrong_cat   = factor(ifelse(Khitrong %in% c(1), "Có", "Không"), levels = c("Không", "Có")),
+    dichtudo_cat   = factor(ifelse(dichtudo %in% c(1), "Có", "Không"), levels = c("Không", "Có")),
+    Tuoi_cat       = factor(ifelse(nguongtuoi == 1, "Có", "Không"), levels = c("Không", "Có")),
+    Soitrong_cat   = factor(ifelse(Soitrong %in% c(1), "Có", "Không"), levels = c("Không", "Có"))
+  )
+
+# 22.2 Chạy mô hình
+fit_mv1 <- glm(GPB_num ~ dichkhutru_cat + nguongtnm_cat + AIR + 
+                         hachviem_cat + Khitrong_cat + dichtudo_cat + 
+                         Tuoi_cat + Soitrong_cat + dkruotthua + dmanhtrang,
+               data = df_mv1, family = binomial)
+
+# 22.3 Vẽ bảng cực sạch
+table_315 <- fit_mv1 %>%
+  tbl_regression(
+    exponentiate = TRUE, 
+    show_single_row = c(dichkhutru_cat, nguongtnm_cat, hachviem_cat, Khitrong_cat, dichtudo_cat, Tuoi_cat, Soitrong_cat),
+    
+    # Ép buộc hiển thị 2 chữ số thập phân để lấy được số 11,99
+    estimate_fun = function(x) style_number(x, digits = 2),
+    
+    label = list(
+      dichkhutru_cat ~ "Dịch khu trú quanh ruột thừa",
+      nguongtnm_cat  ~ "Thâm nhiễm mỡ toàn bộ chu vi",
+      AIR            ~ "Điểm AIR",
+      hachviem_cat   ~ "Hạch viêm",
+      Khitrong_cat   ~ "Khí trong lòng ruột thừa",
+      dichtudo_cat   ~ "Dịch tự do ổ bụng",
+      Tuoi_cat       ~ "Tuổi \u2265 45",
+      Soitrong_cat   ~ "Sỏi trong lòng ruột thừa",
+      dkruotthua     ~ "Đường kính ruột thừa",
+      dmanhtrang     ~ "Bề dày thành manh tràng"
+    ),
+    pvalue_fun = function(x) style_pvalue(x, digits = 3)
+  ) %>%
+  modify_header(
+    label = "**Biến số**",
+    estimate = "**aOR**",
+    ci = "**KTC 95%**",
+    p.value = "**p**"
+  ) %>%
+  # Xóa các cột tiếng Anh dư thừa
+  modify_column_hide(columns = any_of(c("ci_1", "ci_2", "conf.low", "conf.high"))) %>%
+  bold_labels() %>%
+  as_flex_table() %>%
+  
+  # Xóa toàn bộ ghi chú mặc định của phần mềm và chèn ghi chú chuẩn Việt Nam
+  delete_part(part = "footer") %>%
+  add_footer_lines("Ghi chú: Giá trị aOR, KTC 95% và p được ước lượng từ mô hình hồi quy logistic đa biến.") %>%
+  italic(part = "footer") %>%
+  font(fontname = "Times New Roman", part = "all") %>%
+  fontsize(size = 11, part = "all")
+
+# Hiển thị
+table_315
+```
+```{r}
+# ==============================================================
+# 23. XUẤT BẢNG 3.16 & BẢNG 3.17 (SO SÁNH 2 MÔ HÌNH ĐA BIẾN)
+# ==============================================================
+# Cài đặt gói pROC nếu máy chưa có để tính diện tích dưới đường cong (AUC)
+if(!require(pROC)) install.packages("pROC")
+
+library(dplyr)
+library(gtsummary)
+library(flextable)
+library(pROC)
+
+# 23.1 Tiền xử lý dữ liệu: Nạp đầy đủ súng ống cho cả 2 mô hình
+df_compare <- data_clean %>%
+  select(GPB, dichkhutru, nguongtnm, AIR, nguongAIR, hachviem, Khitrong, 
+         dichtudo, nguongtuoi, Soitrong, dkruotthua, dmanhtrang) %>%
+  mutate(
+    GPB_num = ifelse(GPB %in% c(1), 1, 0),
+    
+    # 7 biến định tính chung
+    dichkhutru_cat = factor(ifelse(dichkhutru %in% c(1), "Có", "Không"), levels = c("Không", "Có")),
+    nguongtnm_cat  = factor(ifelse(nguongtnm %in% c(1), "Có", "Không"), levels = c("Không", "Có")),
+    hachviem_cat   = factor(ifelse(hachviem %in% c(1), "Có", "Không"), levels = c("Không", "Có")),
+    Khitrong_cat   = factor(ifelse(Khitrong %in% c(1), "Có", "Không"), levels = c("Không", "Có")),
+    dichtudo_cat   = factor(ifelse(dichtudo %in% c(1), "Có", "Không"), levels = c("Không", "Có")),
+    Tuoi_cat       = factor(ifelse(nguongtuoi == 1, "Có", "Không"), levels = c("Không", "Có")),
+    Soitrong_cat   = factor(ifelse(Soitrong %in% c(1), "Có", "Không"), levels = c("Không", "Có")),
+    
+    # 3 biến ĐÃ CẮT NGƯỠNG dành riêng cho Mô hình 2 (Bảng 3.16)
+    AIR_cat = factor(ifelse(nguongAIR %in% c(1), "Có", "Không"), levels = c("Không", "Có")),
+    dkrt_cat = factor(ifelse(dkruotthua > 11.5, "Có", "Không"), levels = c("Không", "Có")),
+    mt_cat = factor(ifelse(dmanhtrang > 7.2, "Có", "Không"), levels = c("Không", "Có"))
+  )
+
+# 23.2 Chạy 2 mô hình
+# Mô hình 1 (Hỗn hợp - Đã chạy ở Bảng 3.15)
+fit_m1 <- glm(GPB_num ~ dichkhutru_cat + nguongtnm_cat + AIR + hachviem_cat + 
+                        Khitrong_cat + dichtudo_cat + Tuoi_cat + Soitrong_cat + 
+                        dkruotthua + dmanhtrang, data = df_compare, family = binomial)
+
+# Mô hình 2 (Toàn bộ định tính - Dành cho Bảng 3.16)
+fit_m2 <- glm(GPB_num ~ dichkhutru_cat + nguongtnm_cat + AIR_cat + dkrt_cat + 
+                        mt_cat + dichtudo_cat + hachviem_cat + Khitrong_cat + 
+                        Tuoi_cat + Soitrong_cat, data = df_compare, family = binomial)
+
+# 23.3 Xuất BẢNG 3.16 (Mô hình 2)
+table_316 <- fit_m2 %>%
+  tbl_regression(
+    exponentiate = TRUE, 
+    show_single_row = everything(),
+    estimate_fun = function(x) style_number(x, digits = 2),
+    label = list(
+      dichkhutru_cat ~ "Dịch khu trú quanh ruột thừa",
+      nguongtnm_cat  ~ "Thâm nhiễm mỡ toàn bộ chu vi",
+      AIR_cat        ~ "Điểm AIR \u2265 7",
+      dkrt_cat       ~ "Đường kính ruột thừa > 11,5 mm",
+      mt_cat         ~ "Bề dày thành manh tràng > 7,2 mm",
+      dichtudo_cat   ~ "Dịch tự do ổ bụng",
+      hachviem_cat   ~ "Hạch viêm",
+      Khitrong_cat   ~ "Khí trong lòng ruột thừa",
+      Tuoi_cat       ~ "Tuổi \u2265 45",
+      Soitrong_cat   ~ "Sỏi trong lòng ruột thừa"
+    ),
+    pvalue_fun = function(x) style_pvalue(x, digits = 3)
+  ) %>%
+  modify_header(label = "**Biến số**", estimate = "**aOR**", ci = "**KTC 95%**", p.value = "**p**") %>%
+  modify_column_hide(columns = any_of(c("ci_1", "ci_2", "conf.low", "conf.high"))) %>%
+  bold_labels() %>%
+  as_flex_table() %>%
+  delete_part(part = "footer") %>%
+  add_footer_lines("Ghi chú: Giá trị aOR, KTC 95% và p được ước lượng từ mô hình hồi quy logistic đa biến.") %>%
+  italic(part = "footer") %>%
+  font(fontname = "Times New Roman", part = "all") %>%
+  fontsize(size = 11, part = "all")
+
+# 23.4 Tính toán các chỉ số cho BẢNG 3.17
+get_metrics <- function(model) {
+  aic_val <- AIC(model)
+  bic_val <- BIC(model)
+  roc_obj <- roc(model$y, predict(model, type = "response"), quiet = TRUE)
+  auc_val <- as.numeric(roc_obj$auc)
+  # Tính McFadden Pseudo R2 thủ công để tránh rườm rà cài thêm package
+  r2_val <- 1 - (model$deviance / model$null.deviance) 
+  return(c(aic_val, bic_val, auc_val, r2_val))
+}
+
+m1_metrics <- get_metrics(fit_m1)
+m2_metrics <- get_metrics(fit_m2)
+
+df_317 <- data.frame(
+  ChiSo = c("AIC", "BIC", "AUC", "Pseudo R\u00B2"),
+  M1 = c(gsub("\\.", ",", sprintf("%.2f", m1_metrics[1])), gsub("\\.", ",", sprintf("%.2f", m1_metrics[2])),
+         gsub("\\.", ",", sprintf("%.3f", m1_metrics[3])), gsub("\\.", ",", sprintf("%.3f", m1_metrics[4]))),
+  M2 = c(gsub("\\.", ",", sprintf("%.2f", m2_metrics[1])), gsub("\\.", ",", sprintf("%.2f", m2_metrics[2])),
+         gsub("\\.", ",", sprintf("%.3f", m2_metrics[3])), gsub("\\.", ",", sprintf("%.3f", m2_metrics[4])))
+)
+
+# 23.5 Xuất BẢNG 3.17 (So sánh hiệu suất)
+table_317 <- flextable(df_317) %>%
+  set_header_labels(
+    ChiSo = "Chỉ số kiểm\nđịnh*",
+    M1 = "Mô hình 1 (Kết hợp định\nlượng và định tính)",
+    M2 = "Mô hình 2 (Toàn bộ biến định\ntính phân nhóm)"
+  ) %>%
+  bold(part = "header") %>%
+  align(j = 1, align = "left", part = "all") %>%
+  align(j = 2:3, align = "center", part = "all") %>%
+  width(j = 1, width = 1.5) %>%
+  width(j = 2:3, width = 2.2) %>%
+  theme_booktabs() %>%
+  add_footer_lines("*Chỉ số AIC/BIC được trích xuất từ hàm log-likelihood. Giá trị AUC được tính từ đường cong ROC và chỉ số Pseudo R\u00B2 được ước lượng theo phương pháp McFadden.") %>%
+  italic(part = "footer") %>%
+  font(fontname = "Times New Roman", part = "all") %>%
+  fontsize(size = 11, part = "all")
+
+# 23.6 In kết quả ra màn hình (Lần lượt 3.16 và 3.17)
+table_316
+table_317
+```
+```{r}
+# ==============================================================
+# 24. XUẤT BẢNG 3.18: PHÂN TÍCH ĐỘ NHẠY (MÔ HÌNH DỰ BÁO SỚM)
+# ==============================================================
+# Cài đặt gói broom nếu chưa có (dùng để rút trích dữ liệu mô hình siêu nhanh)
+if(!require(broom)) install.packages("broom")
+
+library(dplyr)
+library(broom)
+library(flextable)
+
+# 24.1 Tiền xử lý dữ liệu: Tạo 2 bộ dữ liệu (Toàn bộ và Lọc độ nhạy)
+df_base <- data_clean %>%
+  mutate(
+    GPB_num = ifelse(GPB %in% c(1), 1, 0),
+    dichkhutru_cat = factor(ifelse(dichkhutru %in% c(1), "Có", "Không"), levels = c("Không", "Có")),
+    nguongtnm_cat  = factor(ifelse(nguongtnm %in% c(1), "Có", "Không"), levels = c("Không", "Có")),
+    AIR_cat        = factor(ifelse(nguongAIR %in% c(1), "Có", "Không"), levels = c("Không", "Có")),
+    dkrt_cat       = factor(ifelse(dkruotthua > 11.5, "Có", "Không"), levels = c("Không", "Có")),
+    mt_cat         = factor(ifelse(dmanhtrang > 7.2, "Có", "Không"), levels = c("Không", "Có")),
+    dichtudo_cat   = factor(ifelse(dichtudo %in% c(1), "Có", "Không"), levels = c("Không", "Có")),
+    hachviem_cat   = factor(ifelse(hachviem %in% c(1), "Có", "Không"), levels = c("Không", "Có")),
+    Khitrong_cat   = factor(ifelse(Khitrong %in% c(1), "Có", "Không"), levels = c("Không", "Có")),
+    Tuoi_cat       = factor(ifelse(nguongtuoi == 1, "Có", "Không"), levels = c("Không", "Có")),
+    Soitrong_cat   = factor(ifelse(Soitrong %in% c(1), "Có", "Không"), levels = c("Không", "Có"))
+  )
+
+# Bộ n=397
+df_full <- df_base 
+# Bộ n=327 (Loại trừ áp xe, khí ngoài, sỏi ngoài, tắc ruột)
+df_sens <- df_base %>% 
+  filter(!(apxe == 1 | Khingoai == 1 | Soingoai == 1 | Tacruot == 1))
+
+# 24.2 Chạy 2 mô hình (Luôn đưa đủ 10 biến vào chạy để aOR không bị sai lệch)
+formula_m2 <- GPB_num ~ dichkhutru_cat + nguongtnm_cat + AIR_cat + dkrt_cat + 
+                        mt_cat + dichtudo_cat + hachviem_cat + Khitrong_cat + 
+                        Tuoi_cat + Soitrong_cat
+
+fit_m2 <- glm(formula_m2, data = df_full, family = binomial)
+fit_sens <- glm(formula_m2, data = df_sens, family = binomial)
+
+# 24.3 Hàm định dạng chuỗi "aOR = X (p=Y)" chuẩn Việt Nam
+format_res <- function(fit) {
+  tidy(fit, exponentiate = TRUE) %>%
+    filter(term != "(Intercept)") %>%
+    mutate(
+      aOR_str = gsub("\\.", ",", sprintf("%.2f", estimate)),
+      # Xử lý p-value: nếu <0.001 thì bỏ dấu =, nếu không thì thêm dấu =
+      p_str = ifelse(p.value < 0.001, "<0,001", gsub("\\.", ",", sprintf("=%.3f", p.value))),
+      formatted = paste0("aOR = ", aOR_str, " (p", p_str, ")")
+    ) %>%
+    select(term, formatted)
+}
+
+res_m2 <- format_res(fit_m2) %>% rename(M2 = formatted)
+res_sens <- format_res(fit_sens) %>% rename(Sens = formatted)
+
+# 24.4 Ghép 2 bảng, đổi tên biến và chọn 7 biến cốt lõi để vẽ
+final_res <- res_m2 %>%
+  left_join(res_sens, by = "term") %>%
+  mutate(
+    BienSo = case_when(
+      term == "dichkhutru_catCó" ~ "Dịch khu trú",
+      term == "nguongtnm_catCó"  ~ "Thâm nhiễm mỡ toàn bộ chu vi",
+      term == "AIR_catCó"        ~ "Điểm AIR \u2265 7",
+      term == "dkrt_catCó"       ~ "Đường kính > 11,5 mm",
+      term == "mt_catCó"         ~ "Dày thành manh tràng > 7,2 mm",
+      term == "dichtudo_catCó"   ~ "Dịch tự do",
+      term == "hachviem_catCó"   ~ "Hạch viêm",
+      TRUE ~ term
+    )
+  ) %>%
+  select(BienSo, M2, Sens) %>%
+  # Chỉ giữ lại 7 biến như trong hình của bác sĩ
+  filter(BienSo %in% c("Dịch khu trú", "Thâm nhiễm mỡ toàn bộ chu vi", "Điểm AIR \u2265 7", 
+                       "Đường kính > 11,5 mm", "Dày thành manh tràng > 7,2 mm", 
+                       "Dịch tự do", "Hạch viêm")) %>%
+  # Sắp xếp đúng thứ tự từ trên xuống dưới
+  mutate(BienSo = factor(BienSo, levels = c("Dịch khu trú", "Thâm nhiễm mỡ toàn bộ chu vi", 
+                                            "Điểm AIR \u2265 7", "Đường kính > 11,5 mm", 
+                                            "Dày thành manh tràng > 7,2 mm", 
+                                            "Dịch tự do", "Hạch viêm"))) %>%
+  arrange(BienSo)
+
+# 24.5 Vẽ bảng bằng Flextable
+table_318 <- flextable(final_res) %>%
+  set_header_labels(
+    BienSo = "Biến số dự báo",
+    M2 = paste0("Mô hình 2 (n=", nrow(df_full), ")"),
+    Sens = paste0("Mô hình dự báo sớm\n(n=", nrow(df_sens), ")")
+  ) %>%
+  bold(part = "header") %>%
+  align(j = 1, align = "left", part = "all") %>%
+  align(j = 2:3, align = "center", part = "all") %>%
+  width(j = 1, width = 2.5) %>%
+  width(j = 2:3, width = 2.0) %>%
+  theme_booktabs() %>%
+  add_footer_lines("Ghi chú: Giá trị aOR và p được ước lượng từ các mô hình hồi quy logistic đa biến.") %>%
+  italic(part = "footer") %>%
+  font(fontname = "Times New Roman", part = "all") %>%
+  fontsize(size = 11, part = "all")
+
+# Hiển thị
+table_318
+```
+
+```{r}
+# ==============================================================
+# 25. XUẤT BẢNG 3.19: MÔ HÌNH RÚT GỌN SCAP (FINAL)
+# ==============================================================
+# Đảm bảo đã cài gói broom để trích xuất hệ số Beta siêu chuẩn
+if(!require(broom)) install.packages("broom")
+
+library(dplyr)
+library(broom)
+library(flextable)
+
+# 25.1 Tiền xử lý dữ liệu: Chỉ nạp đúng 5 biến "tinh hoa"
+df_scap <- data_clean %>%
+  mutate(
+    GPB_num = ifelse(GPB %in% c(1), 1, 0),
+    dichkhutru_cat = factor(ifelse(dichkhutru %in% c(1), "Có", "Không"), levels = c("Không", "Có")),
+    nguongtnm_cat  = factor(ifelse(nguongtnm %in% c(1), "Có", "Không"), levels = c("Không", "Có")),
+    AIR_cat        = factor(ifelse(nguongAIR %in% c(1), "Có", "Không"), levels = c("Không", "Có")),
+    dkrt_cat       = factor(ifelse(dkruotthua > 11.5, "Có", "Không"), levels = c("Không", "Có")),
+    mt_cat         = factor(ifelse(dmanhtrang > 7.2, "Có", "Không"), levels = c("Không", "Có"))
+  )
+
+# 25.2 Chạy mô hình rút gọn
+fit_scap <- glm(GPB_num ~ dichkhutru_cat + nguongtnm_cat + AIR_cat + dkrt_cat + mt_cat,
+                data = df_scap, family = binomial)
+
+# Tính khoảng tin cậy (Dùng Profile Likelihood cho kết quả sâu nhất)
+ci_scap <- confint(fit_scap)
+
+# 25.3 Rút trích và "nhào nặn" dữ liệu thành giao diện Word
+res_scap <- tidy(fit_scap) %>%
+  mutate(
+    conf.low = ci_scap[, 1],
+    conf.high = ci_scap[, 2],
+    
+    # Tính OR từ hệ số Beta
+    OR_val = exp(estimate),
+    CI_low = exp(conf.low),
+    CI_high = exp(conf.high),
+    
+    # Định dạng chuẩn số thập phân Việt Nam
+    HeSo = gsub("\\.", ",", sprintf("%.2f", estimate)),
+    aOR = gsub("\\.", ",", sprintf("%.2f", OR_val)),
+    KTC = paste0(gsub("\\.", ",", sprintf("%.2f", CI_low)), " - ", gsub("\\.", ",", sprintf("%.2f", CI_high))),
+    p = ifelse(p.value < 0.001, "< 0,001", gsub("\\.", ",", sprintf("%.3f", p.value)))
+  )
+
+# 25.4 Chỉnh sửa chi tiết (Ẩn OR/p của Hằng số, xếp đúng thứ tự)
+res_scap <- res_scap %>%
+  mutate(
+    # Hằng số không có aOR và KTC
+    aOR = ifelse(term == "(Intercept)", "", aOR),
+    KTC = ifelse(term == "(Intercept)", "", KTC),
+    p = ifelse(term == "(Intercept)", "", p),
+    
+    DacDiem = case_when(
+      term == "dichkhutru_catCó" ~ "Dịch khu trú quanh ruột thừa",
+      term == "nguongtnm_catCó"  ~ "Thâm nhiễm mỡ toàn bộ chu vi",
+      term == "AIR_catCó"        ~ "Điểm AIR \u2265 7",
+      term == "dkrt_catCó"       ~ "Đường kính ruột thừa > 11,5 mm",
+      term == "mt_catCó"         ~ "Bề dày thành manh tràng > 7,2 mm",
+      term == "(Intercept)"      ~ "Hằng số",
+      TRUE ~ term
+    )
+  ) %>%
+  select(DacDiem, HeSo, aOR, KTC, p) %>%
+  # Xếp hằng số xuống đáy bảng
+  arrange(match(DacDiem, c("Dịch khu trú quanh ruột thừa", "Thâm nhiễm mỡ toàn bộ chu vi", 
+                           "Điểm AIR \u2265 7", "Đường kính ruột thừa > 11,5 mm", 
+                           "Bề dày thành manh tràng > 7,2 mm", "Hằng số")))
+
+# 25.5 Kẻ bảng Flextable
+table_319 <- flextable(res_scap) %>%
+  set_header_labels(
+    DacDiem = "Đặc điểm",
+    HeSo = "Hệ số hồi\nquy",
+    aOR = "OR hiệu\nchỉnh",
+    KTC = "KTC 95%",
+    p = "p"
+  ) %>%
+  bold(part = "header") %>%
+  align(j = 1, align = "left", part = "all") %>%
+  align(j = 2:5, align = "center", part = "all") %>%
+  width(j = 1, width = 2.4) %>%
+  width(j = 2:5, width = 1.0) %>%
+  theme_booktabs() %>%
+  add_footer_lines("Ghi chú: Giá trị OR hiệu chỉnh, KTC 95% và p được ước lượng từ mô hình hồi quy logistic đa biến sau khi đã loại bỏ các biến không đạt ý nghĩa thống kê.") %>%
+  italic(part = "footer") %>%
+  font(fontname = "Times New Roman", part = "all") %>%
+  fontsize(size = 11, part = "all")
+
+# Xuất bảng
+table_319
+```
+```{r}
+# ==============================================================
+# 26. XUẤT BẢNG 3.20: ĐÁNH GIÁ ĐỘ PHÙ HỢP CỦA MÔ HÌNH (SCAP)
+# ==============================================================
+# Cài đặt gói tính Hosmer-Lemeshow nếu chưa có
+if(!require(ResourceSelection)) install.packages("ResourceSelection")
+
+library(dplyr)
+library(ResourceSelection)
+library(flextable)
+
+# 26.1 Đảm bảo chạy lại mô hình SCAP (dùng lại df_scap từ Bước 25)
+# Nếu df_scap đã có trong môi trường, ta chạy thẳng fit_scap
+fit_scap <- glm(GPB_num ~ dichkhutru_cat + nguongtnm_cat + AIR_cat + dkrt_cat + mt_cat,
+                data = df_scap, family = binomial)
+
+# 26.2 Tính toán Kiểm định Hosmer-Lemeshow
+# g=8 (chia 8 nhóm) thường được áp dụng khi mô hình có ít biến phân nhóm để ra df=6 giống SPSS
+hl_test <- hoslem.test(fit_scap$y, fitted(fit_scap), g = 8) 
+hl_chi <- hl_test$statistic
+hl_df <- hl_test$parameter
+hl_p <- hl_test$p.value
+
+# 26.3 Tính toán Kiểm định Omnibus (Likelihood Ratio Test)
+omni_chi <- fit_scap$null.deviance - fit_scap$deviance
+omni_df <- fit_scap$df.null - fit_scap$df.residual
+omni_p <- pchisq(omni_chi, omni_df, lower.tail = FALSE)
+
+# 26.4 Tính McFadden's Pseudo R-squared
+r2_mcfadden <- 1 - (fit_scap$deviance / fit_scap$null.deviance)
+
+# 26.5 Hàm định dạng số và ký tự chuẩn Việt Nam
+fmt_chi <- function(x) paste0("\u03C7\u00B2 = ", gsub("\\.", ",", sprintf("%.2f", x))) # Ký tự Chi-bình phương
+fmt_p <- function(x) ifelse(x < 0.001, "< 0,001", gsub("\\.", ",", sprintf("%.3f", x)))
+fmt_num <- function(x) gsub("\\.", ",", sprintf("%.2f", x))
+
+# 26.6 Lắp ráp dữ liệu thành bảng
+df_320 <- data.frame(
+  KiemDinh = c("Độ phù hợp (Hosmer-Lemeshow)", 
+               "Ý nghĩa tổng thể (Omnibus Test)", 
+               "Mức độ giải thích (Pseudo R\u00B2 McFadden)"),
+  HeSo = c(fmt_chi(hl_chi), fmt_chi(omni_chi), fmt_num(r2_mcfadden)),
+  BacTuDo = c(as.character(hl_df), as.character(omni_df), "-"),
+  P_val = c(fmt_p(hl_p), fmt_p(omni_p), "-")
+)
+
+# 26.7 Vẽ bảng bằng Flextable
+table_320 <- flextable(df_320) %>%
+  set_header_labels(
+    KiemDinh = "Kiểm định / Chỉ số",
+    HeSo = "Hệ số",
+    BacTuDo = "Bậc tự do (df)",
+    P_val = "p*"
+  ) %>%
+  bold(part = "header") %>%
+  align(j = 1, align = "left", part = "all") %>%
+  align(j = 2:4, align = "center", part = "all") %>%
+  width(j = 1, width = 3.2) %>%
+  width(j = 2:4, width = 1.2) %>%
+  theme_booktabs() %>%
+  add_footer_lines("*Giá trị p được tính toán thông qua kiểm định Omnibus và kiểm định Hosmer-Lemeshow") %>%
+  italic(part = "footer") %>%
+  font(fontname = "Times New Roman", part = "all") %>%
+  fontsize(size = 11, part = "all")
+
+# Hiển thị bảng
+table_320
+```
+```{r}
+# ==============================================================
+# 28. XUẤT BẢNG 3.21: MA TRẬN NHẦM LẪN CỦA MÔ HÌNH HỒI QUY
+# ==============================================================
+# Đảm bảo cài gói officer để hỗ trợ kẻ dòng phụ cho flextable
+if(!require(officer)) install.packages("officer")
+
+library(dplyr)
+library(flextable)
+library(officer)
+
+# 28.1 Trích xuất xác suất dự báo từ mô hình SCAP (fit_scap đã có ở bước 25)
+# Nếu bác sĩ chưa chạy lại fit_scap trong phiên này, hãy chạy lại nó từ df_scap nhé
+prob_preds <- predict(fit_scap, type = "response")
+
+# Áp dụng ngưỡng cắt 0,5 (50%)
+pred_class <- ifelse(prob_preds >= 0.5, 1, 0)
+actual_class <- fit_scap$y
+
+# Lập bảng chéo đếm số lượng ca bệnh (Confusion Matrix)
+cm <- table(Actual = actual_class, Predicted = pred_class)
+
+# 28.2 Trích xuất 4 ô giá trị cốt lõi
+TN <- cm["0", "0"] # Không biến chứng thực tế - Không biến chứng dự báo
+FP <- cm["0", "1"] # Không biến chứng thực tế - Có biến chứng dự báo (Dương tính giả)
+FN <- cm["1", "0"] # Có biến chứng thực tế - Không biến chứng dự báo (Âm tính giả)
+TP <- cm["1", "1"] # Có biến chứng thực tế - Có biến chứng dự báo
+
+# Tính các tổng biên (hàng ngang, cột dọc)
+total_actual_0 <- TN + FP
+total_actual_1 <- FN + TP
+total_pred_0 <- TN + FN
+total_pred_1 <- FP + TP
+total_all <- total_actual_0 + total_actual_1
+
+# 28.3 Tạo Data Frame theo đúng giao diện Word
+df_cm <- data.frame(
+  Nhom = c("Không biến chứng (thực tế)", 
+           "Viêm ruột thừa có biến chứng\n(thực tế)", 
+           "Tổng cộng"),
+  Pred_0 = c(TN, FN, total_pred_0),
+  Pred_1 = c(FP, TP, total_pred_1),
+  Total = c(total_actual_0, total_actual_1, total_all)
+)
+
+# 28.4 Vẽ và định dạng bảng bằng Flextable
+table_321 <- flextable(df_cm) %>%
+  # Cài đặt tiêu đề cột (\n để xuống dòng như hình gốc)
+  set_header_labels(
+    Nhom = "",
+    Pred_0 = "Không biến chứng\n(dự báo)",
+    Pred_1 = "Viêm ruột thừa\ncó biến chứng\n(dự báo)",
+    Total = "Tổng\ncộng"
+  ) %>%
+  bold(part = "header") %>%
+  
+  # Căn lề
+  align(j = 1, align = "left", part = "all") %>%
+  align(j = 2:4, align = "center", part = "all") %>%
+  
+  # Điều chỉnh độ rộng cột sao cho cân đối giống hình
+  width(j = 1, width = 2.4) %>%
+  width(j = 2, width = 1.8) %>%
+  width(j = 3, width = 1.8) %>%
+  width(j = 4, width = 0.8) %>%
+  
+  # Kẻ khung chuẩn
+  theme_booktabs() %>%
+  
+  # Kẻ thêm một đường ngang mảnh ở phía trên dòng "Tổng cộng" (dòng số 2)
+  hline(i = 2, border = fp_border(color = "black", width = 1)) %>%
+  
+  # Chèn dòng Ghi chú
+  add_footer_lines("Ghi chú: Các tần số được trích xuất từ ma trận phân loại với ngưỡng xác suất cắt mặc định là 0,5") %>%
+  italic(part = "footer") %>%
+  
+  # Đồng bộ Font
+  font(fontname = "Times New Roman", part = "all") %>%
+  fontsize(size = 11, part = "all")
+
+# Hiển thị bảng
+table_321
+```
+```{r}
+# ==============================================================
+# 29. XUẤT BẢNG: CÁC CHỈ SỐ CHẨN ĐOÁN CỦA MÔ HÌNH SCAP
+# ==============================================================
+library(dplyr)
+library(flextable)
+
+# 29.1 Lấy lại 4 giá trị từ Ma trận nhầm lẫn ở bước trước
+TP <- 126  # True Positive (Có BC thực tế & dự báo Có BC)
+TN <- 198  # True Negative (Không BC thực tế & dự báo Không BC)
+FP <- 34   # False Positive (Không BC thực tế nhưng dự báo Có BC)
+FN <- 39   # False Negative (Có BC thực tế nhưng dự báo Không BC)
+Total <- TP + TN + FP + FN
+
+# 29.2 Tính toán các chỉ số (%)
+Sens <- (TP / (TP + FN)) * 100
+Spec <- (TN / (TN + FP)) * 100
+PPV  <- (TP / (TP + FP)) * 100
+NPV  <- (TN / (TN + FN)) * 100
+Acc  <- ((TP + TN) / Total) * 100
+
+# Hàm đổi dấu chấm thành phẩy và giữ 1 chữ số thập phân
+fmt_pct <- function(x) gsub("\\.", ",", sprintf("%.1f", x))
+
+# 29.3 Tạo bảng dữ liệu
+df_metrics <- data.frame(
+  ChiSo = c("Độ nhạy (Sensitivity)",
+            "Độ đặc hiệu (Specificity)",
+            "Giá trị tiên đoán dương (PPV)",
+            "Giá trị tiên đoán âm (NPV)",
+            "Độ chính xác (Accuracy)"),
+  GiaTri = c(fmt_pct(Sens), fmt_pct(Spec), fmt_pct(PPV), fmt_pct(NPV), fmt_pct(Acc))
+)
+
+# 29.4 Vẽ bảng chuẩn Word
+table_metrics <- flextable(df_metrics) %>%
+  set_header_labels(
+    ChiSo = "Chỉ số chẩn đoán",
+    GiaTri = "Giá trị (%)"
+  ) %>%
+  bold(part = "header") %>%
+  align(j = 1, align = "left", part = "all") %>%
+  align(j = 2, align = "center", part = "all") %>%
+  width(j = 1, width = 3.5) %>%
+  width(j = 2, width = 1.5) %>%
+  theme_booktabs() %>%
+  add_footer_lines("Ghi chú: Các chỉ số được tính toán tại ngưỡng xác suất cắt (cutoff) mặc định là 0,5.") %>%
+  italic(part = "footer") %>%
+  font(fontname = "Times New Roman", part = "all") %>%
+  fontsize(size = 11, part = "all")
+
+# Hiển thị
+table_metrics
+```
+```{r}
+# ==============================================================
+# 30. VẼ BIỂU ĐỒ 3.7: PHÂN BỐ XÁC SUẤT DỰ BÁO (MIRROR HISTOGRAM)
+# ==============================================================
+library(dplyr)
+library(ggplot2)
+
+# 30.1 Trích xuất xác suất dự báo từ mô hình SCAP (fit_scap)
+# Đảm bảo fit_scap đã được chạy ở bước 25
+prob_preds <- predict(fit_scap, type = "response")
+
+# 30.2 Tạo Data Frame chứa xác suất và phân nhóm thực tế
+df_plot <- data.frame(
+  XacSuat = prob_preds,
+  GPB_thucte = factor(fit_scap$y, 
+                      levels = c(0, 1), 
+                      labels = c("Không biến chứng", "Viêm ruột thừa có biến chứng"))
+)
+
+# 30.3 Vẽ biểu đồ đối xứng bằng ggplot2
+plot_37 <- ggplot(df_plot, aes(x = XacSuat, fill = GPB_thucte)) +
+  
+  # Cột hướng lên cho nhóm "Viêm ruột thừa có biến chứng" (GPB = 1)
+  geom_histogram(data = filter(df_plot, GPB_thucte == "Viêm ruột thừa có biến chứng"),
+                 aes(y = after_stat(count)), 
+                 binwidth = 0.02, color = "white", linewidth = 0.2) +
+  
+  # Cột hướng xuống cho nhóm "Không biến chứng" (GPB = 0) bằng cách thêm dấu TRỪ (-) vào count
+  geom_histogram(data = filter(df_plot, GPB_thucte == "Không biến chứng"),
+                 aes(y = -after_stat(count)), 
+                 binwidth = 0.02, color = "white", linewidth = 0.2) +
+  
+  # Vẽ đường ranh giới cắt 0,5 (màu đỏ, nét đứt dày)
+  geom_vline(xintercept = 0.5, color = "#e41a1c", linetype = "dashed", linewidth = 1.2) +
+  
+  # Tùy chỉnh màu sắc y hệt bản gốc
+  scale_fill_manual(values = c(
+    "Không biến chứng" = "#84c6bc",            # Màu xanh mint nhạt
+    "Viêm ruột thừa có biến chứng" = "#1c5145" # Màu xanh rêu đậm
+  )) +
+  
+  # Cấu hình trục Y (Hiển thị số dương cho cả 2 chiều lên/xuống)
+  scale_y_continuous(
+    breaks = seq(-75, 75, by = 25), 
+    labels = abs, # Hàm abs biến số âm thành số dương khi hiển thị
+    limits = c(-60, 45) # Ép khoảng giới hạn (cột dưới dài hơn cột trên)
+  ) +
+  
+  # Cấu hình trục X (Giữ nguyên các mốc 0.00, 0.25, 0.50, 0.75)
+  scale_x_continuous(
+    breaks = c(0, 0.25, 0.5, 0.75), 
+    labels = c("0.00", "0.25", "0.50", "0.75"),
+    limits = c(-0.02, 1.02)
+  ) +
+  
+  # Gắn nhãn các trục và chú giải
+  labs(
+    x = "Xác suất dự đoán (Predicted probability)",
+    y = "Số lượng bệnh nhân (Count)",
+    fill = "Kết quả giải phẫu bệnh"
+  ) +
+  
+  # Định dạng giao diện tối giản, sạch sẽ
+  theme_minimal() +
+  theme(
+    legend.position = "bottom", # Đưa chú giải xuống đáy
+    legend.title = element_text(face = "bold", margin = margin(r = 10)),
+    axis.title.x = element_text(margin = margin(t = 15)),
+    axis.title.y = element_text(margin = margin(r = 15)),
+    panel.grid.minor = element_blank(), # Bỏ các lưới mờ phụ
+    panel.grid.major.x = element_line(color = "grey90"), # Làm mờ đường kẻ dọc
+    panel.grid.major.y = element_line(color = "grey90")  # Làm mờ đường kẻ ngang
+  )
+
+# Hiển thị biểu đồ
+plot_37
+```
+```{r}
+# ==============================================================
+# 31. XUẤT BẢNG 3.23: LỢI ÍCH RÒNG CỦA MÔ HÌNH SCAP (TỪ DCA)
+# ==============================================================
+library(dplyr)
+library(flextable)
+
+# 31.1 Trích xuất dữ liệu xác suất và kết cục thực tế
+# Đảm bảo prob_preds và fit_scap đã có sẵn từ các bước trước
+N <- nrow(data_clean)
+actual_pos <- sum(fit_scap$y == 1) # Tổng số ca có biến chứng
+actual_neg <- sum(fit_scap$y == 0) # Tổng số ca không biến chứng
+
+# 31.2 Thiết lập 4 ngưỡng quyết định lâm sàng cần khảo sát
+pt_seq <- c(0.10, 0.30, 0.50, 0.80)
+labels_seq <- c("10% (Ngưỡng nhạy)",
+                "30% (Ngưỡng trung bình)",
+                "50% (Ngưỡng thận trọng)",
+                "80% (Ngưỡng chắc chắn)")
+
+results_nb <- data.frame()
+
+# 31.3 Vòng lặp tính Lợi ích ròng (Net Benefit) tại từng ngưỡng
+for(i in 1:length(pt_seq)) {
+  pt <- pt_seq[i]
+  lbl <- labels_seq[i]
+  
+  # Tính trọng số phạt dương tính giả: w = pt / (1 - pt)
+  w <- pt / (1 - pt)
+  
+  # A. Lợi ích ròng "Can thiệp tất cả" (Treat All)
+  nb_all <- (actual_pos / N) - (actual_neg / N) * w
+  
+  # B. Lợi ích ròng "Không can thiệp" (Treat None) luôn = 0
+  
+  # C. Lợi ích ròng của Mô hình SCAP
+  pred_class <- ifelse(prob_preds >= pt, 1, 0)
+  TP <- sum(pred_class == 1 & fit_scap$y == 1) # True Positive tại ngưỡng pt
+  FP <- sum(pred_class == 1 & fit_scap$y == 0) # False Positive tại ngưỡng pt
+  
+  nb_model <- (TP / N) - (FP / N) * w
+  
+  # Hàm định dạng: làm tròn 2 chữ số, đổi dấu chấm thành phẩy
+  fmt_num <- function(x) {
+    if(x == 0) return("0")
+    res <- sprintf("%.2f", x)
+    return(gsub("\\.", ",", res))
+  }
+  
+  # Lưu vào bảng
+  results_nb <- rbind(results_nb, data.frame(
+    NguyCo = lbl,
+    NB_All = fmt_num(nb_all),
+    NB_None = "0",
+    NB_Model = fmt_num(nb_model)
+  ))
+}
+
+# 31.4 Vẽ và định dạng Bảng 3.23 bằng Flextable
+table_323 <- flextable(results_nb) %>%
+  set_header_labels(
+    NguyCo = "Nguy cơ chấp nhận\nphẫu thuật",
+    NB_All = "Lợi ích ròng của\n\"Can thiệp tất cả\"",
+    NB_None = "Lợi ích ròng của\n\"Không can thiệp\"",
+    NB_Model = "Lợi ích ròng của\nMô hình SCAP"
+  ) %>%
+  bold(part = "header") %>%
+  align(j = 1, align = "left", part = "all") %>%
+  align(j = 2:4, align = "center", part = "all") %>%
+  width(j = 1, width = 2.0) %>%
+  width(j = 2:4, width = 1.6) %>%
+  theme_booktabs() %>%
+  add_footer_lines("*Các giá trị lợi ích ròng được tính toán thông qua thuật toán phân tích đường cong quyết định") %>%
+  italic(part = "footer") %>%
+  font(fontname = "Times New Roman", part = "all") %>%
+  fontsize(size = 11, part = "all")
+
+# Hiển thị bảng
+table_323
+```
+```{r}
+# ==============================================================
+# 32. TÍNH ĐIỂM SCAP VÀ VẼ ĐƯỜNG CONG ROC (THANG ĐIỂM 11 ĐIỂM)
+# ==============================================================
+library(pROC)
+library(dplyr)
+
+# 32.1 Tính điểm SCAP (0 - 11 điểm) cho từng bệnh nhân 
+df_score <- data_clean %>%
+  mutate(
+    GPB_num = ifelse(GPB %in% c(1), 1, 0),
+    
+    # Ép cắt ngưỡng và gán điểm chuẩn xác 100% theo Bảng 3.24
+    Score_DichKhuTru = ifelse(dichkhutru %in% c(1), 3, 0),
+    Score_TNM        = ifelse(nguongtnm %in% c(1), 3, 0),
+    Score_AIR        = ifelse(nguongAIR %in% c(1), 2, 0),
+    Score_DKRT       = ifelse(dkruotthua > 11.5, 2, 0),
+    Score_MT         = ifelse(dmanhtrang > 7.2, 1, 0),
+    
+    # Cộng dồn thành Tổng điểm SCAP
+    SCAP_Score = Score_DichKhuTru + Score_TNM + Score_AIR + Score_DKRT + Score_MT
+  )
+
+# 32.2 Khởi tạo đường cong ROC cho Thang điểm SCAP
+roc_score <- roc(df_score$GPB_num, df_score$SCAP_Score, quiet = TRUE)
+
+# 32.3 Rút trích giá trị AUC và Khoảng tin cậy 95%
+auc_val <- as.numeric(auc(roc_score))
+ci_val <- ci(roc_score)
+
+# Đổi dấu chấm thành dấu phẩy cho bản vẽ
+auc_text <- paste0("AUC = ", gsub("\\.", ",", sprintf("%.3f", auc_val)))
+
+# ==============================================================
+# 32.4 Vẽ Biểu đồ 3.11 (Bản chuẩn tỷ lệ vuông 1:1, Trục số đẹp)
+# ==============================================================
+
+# Ép khung hình đồ thị luôn luôn là hình vuông (square)
+par(pty = "s")
+
+plot(roc_score,
+     legacy.axes = TRUE,  # Đã tự động chuyển trục thành 0 -> 1
+     col = "#f03b20",     # Màu đỏ y hệt bản gốc
+     lwd = 2,
+     xlab = "Tỷ lệ dương tính giả (1 - Độ đặc hiệu)",
+     ylab = "Tỷ lệ dương tính thật (Độ nhạy)",
+     xaxt = "n", # Tắt trục X mặc định bị lỗi số dài
+     yaxt = "n") # Tắt trục Y mặc định bị lỗi số dài
+
+# Vẽ lại trục X và Y với các mốc tiến dần từ 0.0 đến 1.0
+axis(1, at = seq(0, 1, by = 0.2), labels = c("0.0", "0.2", "0.4", "0.6", "0.8", "1.0"))
+axis(2, at = seq(0, 1, by = 0.2), labels = c("0.0", "0.2", "0.4", "0.6", "0.8", "1.0"))
+
+# Gắn chữ AUC
+legend("bottomright",
+       legend = auc_text,
+       text.col = "#f03b20",
+       text.font = 2,
+       bty = "n")
+```
+```{r}
+# ==============================================================
+# 35. BẢNG 3.25 (CÔNG THỨC) VÀ THỐNG KÊ BẢNG 3.26 (PHÂN TĂNG)
+# ==============================================================
+library(dplyr)
+library(flextable)
+
+# --------------------------------------------------------------
+# PHẦN 1: TẠO BẢNG 3.25 DỰA TRÊN CÔNG THỨC HỒI QUY CỦA ĐIỂM SỐ
+# --------------------------------------------------------------
+# Chạy mô hình hồi quy logistic lấy Tổng điểm SCAP làm biến độc lập
+fit_score_model <- glm(GPB_num ~ SCAP_Score, data = df_score, family = binomial)
+
+# Tạo khung điểm từ 0 đến 11
+df_325 <- data.frame(SCAP_Score = 0:11)
+
+# Dự báo xác suất dựa trên công thức toán học (Mượt mà 100%)
+df_325$Prob <- predict(fit_score_model, newdata = df_325, type = "response") * 100
+
+# Trình bày dữ liệu
+df_325_format <- df_325 %>%
+  mutate(
+    Diem = paste0(SCAP_Score, " điểm"),
+    NguyCo = paste0(gsub("\\.", ",", sprintf("%.1f", Prob)), "%")
+  ) %>%
+  select(Diem, NguyCo)
+
+# Vẽ Bảng 3.25 bằng Flextable
+table_325 <- flextable(df_325_format) %>%
+  set_header_labels(
+    Diem = "Tổng điểm SCAP",
+    NguyCo = "Ước tính nguy cơ biến chứng (%)"
+  ) %>%
+  bold(part = "header") %>%
+  align(j = 1, align = "left", part = "all") %>%
+  align(j = 2, align = "center", part = "all") %>%
+  width(j = 1, width = 2) %>%
+  width(j = 2, width = 2.5) %>%
+  theme_booktabs() %>%
+  add_footer_lines("Ghi chú: Tỷ lệ nguy cơ được ước lượng dựa trên hàm số phân bố xác suất logistic của thang điểm.") %>%
+  italic(part = "footer") %>%
+  font(fontname = "Times New Roman", part = "all") %>%
+  fontsize(size = 11, part = "all")
+
+# Hiển thị Bảng 3.25
+table_325
+
+# --------------------------------------------------------------
+# PHẦN 2: TÍNH TOÁN CÁC CHỈ SỐ CHO BẢNG 3.26 (PHÂN TẦNG NGUY CƠ)
+# Do thang điểm tăng lên 11, ta giả định chia 3 nhóm: 
+# Thấp (0-3 đ), Trung bình (4-6 đ), Cao (7-11 đ). 
+# Bác sĩ có thể tự thay đổi số 3 và 6 trong code nếu muốn đổi ngưỡng.
+# --------------------------------------------------------------
+nguong_thap <- 3
+nguong_cao <- 7
+
+cat("\n======================================================\n")
+cat("THÔNG SỐ ĐỂ BÁC SĨ ĐIỀN VÀO BẢNG 3.26 (PHÂN TẦNG NGUY CƠ)\n")
+cat("======================================================\n\n")
+
+# 1. Nhóm Nguy cơ thấp (0 - 3 điểm)
+# -> Dùng điểm cắt >= 4 để loại trừ (Rule-out)
+pred_thap <- ifelse(df_score$SCAP_Score >= (nguong_thap + 1), 1, 0)
+TP_t <- sum(pred_thap == 1 & df_score$GPB_num == 1)
+FN_t <- sum(pred_thap == 0 & df_score$GPB_num == 1)
+TN_t <- sum(pred_thap == 0 & df_score$GPB_num == 0)
+FP_t <- sum(pred_thap == 1 & df_score$GPB_num == 0)
+
+Se_thap <- (TP_t / (TP_t + FN_t)) * 100
+NPV_thap <- (TN_t / (TN_t + FN_t)) * 100
+Prob_thap <- mean(df_score$GPB_num[df_score$SCAP_Score <= nguong_thap]) * 100
+
+cat(sprintf("1. NGUY CƠ THẤP (0 - %d điểm):\n", nguong_thap))
+cat(sprintf("- Xác suất biến chứng trung bình: %.1f%%\n", Prob_thap))
+cat(sprintf("- Độ nhạy (Se) đạt: %.1f%%\n", Se_thap))
+cat(sprintf("- Giá trị tiên đoán âm (NPV) đạt: %.1f%%\n\n", NPV_thap))
+
+# 2. Nhóm Nguy cơ cao (7 - 11 điểm)
+# -> Dùng điểm cắt >= 7 để chẩn đoán xác định (Rule-in)
+pred_cao <- ifelse(df_score$SCAP_Score >= nguong_cao, 1, 0)
+TP_c <- sum(pred_cao == 1 & df_score$GPB_num == 1)
+FN_c <- sum(pred_cao == 0 & df_score$GPB_num == 1)
+TN_c <- sum(pred_cao == 0 & df_score$GPB_num == 0)
+FP_c <- sum(pred_cao == 1 & df_score$GPB_num == 0)
+
+Sp_cao <- (TN_c / (TN_c + FP_c)) * 100
+PPV_cao <- (TP_c / (TP_c + FP_c)) * 100
+Prob_cao <- mean(df_score$GPB_num[df_score$SCAP_Score >= nguong_cao]) * 100
+
+cat(sprintf("2. NGUY CƠ CAO (%d - 11 điểm):\n", nguong_cao))
+cat(sprintf("- Xác suất biến chứng trung bình: %.1f%%\n", Prob_cao))
+cat(sprintf("- Độ đặc hiệu (Sp) đạt: %.1f%%\n", Sp_cao))
+cat(sprintf("- Giá trị tiên đoán dương (PPV) đạt: %.1f%%\n\n", PPV_cao))
+
+# 3. Nhóm Nguy cơ trung bình (4 - 6 điểm)
+Prob_tb <- mean(df_score$GPB_num[df_score$SCAP_Score > nguong_thap & df_score$SCAP_Score < nguong_cao]) * 100
+cat(sprintf("3. NGUY CƠ TRUNG BÌNH (%d - %d điểm):\n", nguong_thap + 1, nguong_cao - 1))
+cat(sprintf("- Xác suất biến chứng trung bình: %.1f%%\n", Prob_tb))
+```
+
