@@ -6,3 +6,9 @@ Nhằm bám sát xu hướng khoa học mở (Open Science) và đảm bảo tí
 
 
 Tuân thủ quy định về y đức, bộ dữ liệu gốc không được đăng tải công khai mà được quản lý bảo mật trên hệ thống REDCap của bệnh viện.
+
+## How to Cite
+
+The peer-reviewed paper associated with this project is currently in preparation. If you use this source code or the SCAP model methodology in your research, please cite the original Medical Residency Thesis as follows:
+
+**Pham, T. N. (2026). *R Source Code for SCAP Model: Prediction of Acute Complicated Appendicitis*. Medical Residency Thesis. GitHub repository. https://github.com/phamthainguyen-md/Phu-Luc-Luan-Van-2026**
