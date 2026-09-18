@@ -1,0 +1,1062 @@
+---
+title: "SCAP MODEL: STATISTICAL ANALYSIS AND PREDICTIVE MODELING"
+author: "Nguyen Thai Pham, MD"
+date: "2026-09-16"
+output:
+  html_document:
+    df_print: paged
+    toc: true
+    toc_float: true
+    theme: flatly
+  word_document: default
+---
+
+```{r setup, include=FALSE}
+# ======================================================================
+# STEP 1: LOAD LIBRARIES & DATA PREPARATION
+# ======================================================================
+library(haven)    
+library(dplyr)    
+
+# Load SPSS dataset
+data_raw <- read_sav("D:/NghienCuu/Nghiencuu.sav")
+
+# Standardize binary classification and establish quantitative thresholds
+data_clean <- data_raw %>%
+  mutate(
+    # Outcome variable (1 = Complicated, 0 = Uncomplicated)
+    GPB          = as.numeric(ifelse(GPB == 2, 0, GPB)), 
+    
+    # Standardize categorical variables encoding (1 = Present, 0 = Absent)
+    nguongtuoi   = as.numeric(ifelse(nguongtuoi == 2, 0, nguongtuoi)),
+    Soitrong     = as.numeric(ifelse(Soitrong == 2, 0, Soitrong)),
+    nguongtnm    = as.numeric(ifelse(nguongtnm == 2, 0, nguongtnm)),
+    Khitrong     = as.numeric(ifelse(Khitrong == 2, 0, Khitrong)),
+    hachviem     = as.numeric(ifelse(hachviem == 2, 0, hachviem)),
+    dichtudo     = as.numeric(ifelse(dichtudo == 2, 0, dichtudo)),
+    dichkhutru   = as.numeric(ifelse(dichkhutru == 2, 0, dichkhutru)),
+    nguongAIR    = as.numeric(ifelse(nguongAIR == 2, 0, nguongAIR)),
+    
+    # Categorize continuous variables based on optimal cut-off values
+    nguongdkrt   = as.numeric(ifelse(dkruotthua > 11.5, 1, 0)),
+    nguongmt     = as.numeric(ifelse(dmanhtrang > 7.2, 1, 0)) 
+  )
+```
+
+### 1. MULTIVARIABLE LOGISTIC REGRESSION (INITIAL 10-VARIABLE MODEL)
+The following code establishes a multivariable logistic regression model with 10 potential risk factors. The statistical output (p-values, aOR, 95% CI) is utilized to screen for independent prognostic factors to build the reduced model.
+
+```{r multi_model_10, echo=TRUE, warning=FALSE, message=FALSE}
+# Fit the initial multivariable logistic regression model
+model_10_vars <- glm(GPB ~ dichkhutru + nguongtnm + nguongAIR + 
+                       nguongdkrt + nguongmt + dichtudo + hachviem + 
+                       Khitrong + nguongtuoi + Soitrong, 
+                     data = data_clean, 
+                     family = binomial)
+
+# Extract model statistical summary
+summary(model_10_vars)
+
+# Estimate adjusted Odds Ratios (aOR) and 95% Confidence Intervals
+exp(cbind(aOR = coef(model_10_vars), confint(model_10_vars)))
+```
+
+### 2. REDUCED MODEL (SCAP SCORE) AND ROC CURVE ANALYSIS
+Based on the initial multivariable analysis, 5 independent prognostic factors (p < 0.05) were retained: Localized periappendiceal fluid, Circumferential fat stranding, AIR score >= 7, Appendix diameter > 11.5 mm, and Cecal wall thickness > 7.2 mm. These variables construct the SCAP predictive model. The discriminative ability is evaluated using the Area Under the Receiver Operating Characteristic Curve (AUC).
+
+```{r scap_model_roc, echo=TRUE, warning=FALSE, message=FALSE, fig.width=6, fig.height=6}
+# Fit the reduced SCAP model (5 variables)
+model_scap <- glm(GPB ~ dichkhutru + nguongtnm + nguongAIR + 
+                    nguongdkrt + nguongmt, 
+                  data = data_clean, 
+                  family = binomial)
+
+# Estimate aOR and 95% CI for the reduced model
+exp(cbind(aOR = coef(model_scap), confint(model_scap)))
+
+# ROC Curve and AUC Calculation
+library(pROC)
+
+# Estimate predicted probabilities for each observation
+prob_scap <- predict(model_scap, type = "response")
+
+# Initialize ROC object and compute 95% CI for AUC
+roc_scap <- roc(data_clean$GPB, prob_scap)
+roc_ci <- ci(roc_scap)
+
+# Configure numeric format for coordinate axes
+options(scipen = 999)
+
+# Visualize ROC Curve
+plot(roc_scap,
+     legacy.axes = TRUE,
+     col = "#1f77b4",
+     lwd = 2,
+     xlab = "False Positive Rate (1 - Specificity)",
+     ylab = "True Positive Rate (Sensitivity)")
+
+# Extract and format AUC and 95% CI labels
+auc_text <- sprintf("AUC = %.3f", roc_ci[2])
+ci_text <- sprintf("95%% CI: %.3f - %.3f", roc_ci[1], roc_ci[3])
+
+# Configure legend for the plot
+legend("bottomright",
+       legend = c(auc_text, ci_text),
+       text.col = "#1f77b4", 
+       text.font = 2,        
+       bty = "n")
+```
+
+### 3. INTERNAL VALIDATION
+To ensure the SCAP model is robust against overfitting and generalizable to new cohorts, internal validation was performed using two techniques: Bootstrap resampling (2000 iterations) and Leave-One-Out Cross-Validation (LOOCV).
+
+```{r validation_bootstrap_loocv, echo=TRUE, warning=FALSE, message=FALSE}
+# Set random seed to ensure computational reproducibility
+set.seed(2026) 
+
+# ==========================================
+# 3.1. BOOTSTRAP VALIDATION (2000 REPLICATES)
+# ==========================================
+# Compute optimism-corrected 95% CI for AUC using 2000 bootstrap resamples
+boot_auc <- ci.auc(roc_scap, method = "bootstrap", boot.n = 2000)
+
+cat("--- BOOTSTRAP VALIDATION RESULTS (2000 REPLICATES) ---\n")
+print(boot_auc)
+
+# ==========================================
+# 3.2. LEAVE-ONE-OUT CROSS-VALIDATION (LOOCV)
+# ==========================================
+n <- nrow(data_clean)
+loocv_preds <- numeric(n)
+
+# LOOCV Algorithm: Train the model n times, iteratively excluding 1 observation for validation
+for (i in 1:n) {
+  train_data <- data_clean[-i, ]
+  test_data  <- data_clean[i, , drop = FALSE]
+  
+  # Fit the model on the training set
+  fit_loocv <- glm(GPB ~ dichkhutru + nguongtnm + nguongAIR + 
+                     nguongdkrt + nguongmt, 
+                   data = train_data, 
+                   family = binomial)
+  
+  # Estimate predicted probability on the excluded observation
+  loocv_preds[i] <- predict(fit_loocv, newdata = test_data, type = "response")
+}
+
+# Re-calculate AUC based on LOOCV predictions
+roc_loocv <- roc(data_clean$GPB, loocv_preds)
+
+cat("\n--- LOOCV RESULTS ---\n")
+cat("SCAP Model AUC after LOOCV:", round(auc(roc_loocv), 3), "\n")
+```
+
+### 4. MODEL CALIBRATION
+The agreement between predicted probabilities and observed frequencies was evaluated using a calibration plot.
+
+```{r calibration_and_metrics, echo=TRUE, warning=FALSE, message=FALSE, fig.width=8, fig.height=8}
+# ==========================================
+# 4. BOOTSTRAP CALIBRATION PLOT 
+# ==========================================
+library(rms)
+
+# Configure data environment for the rms package
+dd <- datadist(data_clean)
+options(datadist = "dd")
+
+# Fit model using lrm function for calibration assessment
+fit_rms <- lrm(GPB ~ dichkhutru + nguongtnm + nguongAIR + 
+                     nguongdkrt + nguongmt, 
+               data = data_clean, 
+               x = TRUE, y = TRUE)
+
+# Perform calibration using 2000 bootstrap resamples
+set.seed(2026)
+cal <- calibrate(fit_rms, method = "boot", B = 2000)
+
+# Adjust plot margins to optimize legend placement
+par(mar = c(6, 5, 4, 2) + 0.1)
+
+# Visualize calibration plot
+plot(cal,
+     lwd = 2,
+     legend = FALSE, 
+     subtitles = FALSE, # Disable default lrm subtitles
+     xlab = "Predicted Probability",
+     ylab = "Observed Proportion",
+     xlim = c(0, 1), ylim = c(0, 1))
+
+# Configure legend
+legend("bottomright", 
+       legend = c("Apparent", 
+                  "Bias-corrected", 
+                  "Ideal", 
+                  "95% Confidence Limit"),
+       lty = c(1, 1, 2, 1), 
+       col = c("black", "blue", "black", "gray"),
+       bty = "n", cex = 0.8)
+
+# Integrate Bootstrap metrics (MAE and n) into the plot
+mtext("B = 2000 repetitions, Bootstrap", side = 1, line = 4, adj = 0, cex = 0.8)
+mtext(sprintf("Mean Absolute Error (MAE) = %.2f | n = %d", 
+              mean(abs(cal[,"predy"] - cal[,"calibrated.corrected"])), 
+              nrow(data_clean)), 
+      side = 1, line = 4, adj = 1, cex = 0.8)
+
+# ==========================================
+# 5. RMSE AND F1-SCORE FROM LOOCV
+# ==========================================
+library(caret)
+
+# Compute Root Mean Square Error (RMSE)
+rmse_loocv <- sqrt(mean((data_clean$GPB - loocv_preds)^2))
+
+# Classify predicted outcomes based on a 0.5 probability cut-off
+loocv_class <- ifelse(loocv_preds >= 0.5, 1, 0)
+
+# Construct Confusion Matrix and extract F1-score
+cm <- confusionMatrix(factor(loocv_class, levels = c(0, 1)), 
+                      factor(data_clean$GPB, levels = c(0, 1)), 
+                      positive = "1")
+f1_loocv <- cm$byClass["F1"]
+
+# Display algorithm performance metrics
+cat("\n--- PERFORMANCE METRICS (LOOCV) ---\n")
+cat("RMSE (Root Mean Square Error):", round(rmse_loocv, 2), "\n")
+cat("F1-Score:", round(f1_loocv, 2), "\n")
+```
+
+### 5. NOMOGRAM AND DECISION CURVE ANALYSIS (DCA)
+To provide a visual tool for clinical application, a nomogram was constructed. Furthermore, Decision Curve Analysis (DCA) was utilized to quantify the clinical utility of the SCAP model across varying threshold probabilities.
+
+```{r nomogram_and_dca, echo=TRUE, warning=FALSE, message=FALSE, fig.width=9, fig.height=6}
+# ==========================================
+# 1. NOMOGRAM CONSTRUCTION 
+# ==========================================
+library(rms)
+library(Hmisc) 
+
+# 1.1 Standardize variable labels for Nomogram display
+label(data_clean$dichkhutru) <- "Localized periappendiceal fluid"
+label(data_clean$nguongtnm)  <- "Circumferential fat stranding"
+label(data_clean$nguongAIR)  <- "AIR score >= 7"
+label(data_clean$nguongdkrt) <- "Appendix diameter > 11.5 mm"
+label(data_clean$nguongmt)   <- "Cecal wall thickness > 7.2 mm"
+
+# 1.2 Package data environment
+dd <- datadist(data_clean)
+options(datadist = "dd")
+
+# 1.3 Refit lrm model
+fit_rms <- lrm(GPB ~ dichkhutru + nguongtnm + nguongAIR + 
+                     nguongdkrt + nguongmt, 
+               data = data_clean, 
+               x = TRUE, y = TRUE)
+
+# 1.4 Generate Nomogram object
+nom <- nomogram(fit_rms, 
+                fun = function(x) 1/(1+exp(-x)), 
+                funlabel = "Risk of Complications (%)", 
+                fun.at = c(0.05, 0.1, 0.2, 0.3, 0.5, 0.7, 0.8, 0.9),
+                lp = FALSE) 
+
+# 1.5 Visualize Nomogram
+plot(nom, 
+     xfrac = 0.5,        # Adjust left margin ratio for labels
+     cex.axis = 0.9,     # Axis label font size ratio
+     cex.var = 0.9,      # Variable name font size ratio
+     force.label = TRUE)
+
+# ==========================================
+# 2. DECISION CURVE ANALYSIS (DCA) 
+# ==========================================
+library(dcurves)
+library(ggplot2)
+
+# 2.1 Integrate predicted probabilities into the dataset
+data_clean$prob_scap <- prob_scap
+
+# 2.2 Perform DCA
+dca_res <- dca(GPB ~ prob_scap, 
+               data = data_clean,
+               label = list(prob_scap = "SCAP Model"))
+
+# 2.3 Visualize DCA using ggplot2
+plot(dca_res, smooth = TRUE) + 
+  aes(linetype = label) + 
+  
+  # Configure color palette and standardize strategy labels
+  scale_color_manual(
+    name = "Strategy",
+    breaks = c("Treat All", "Treat None", "SCAP Model"),
+    labels = c("Treat All", "Treat None", "SCAP Model"),
+    values = c("Treat All" = "#7570b3", "Treat None" = "#1b9e77", "SCAP Model" = "#d95f02")
+  ) +
+  scale_linetype_manual(
+    name = "Strategy",
+    breaks = c("Treat All", "Treat None", "SCAP Model"),
+    labels = c("Treat All", "Treat None", "SCAP Model"),
+    values = c("Treat All" = "dashed", "Treat None" = "dotted", "SCAP Model" = "solid")
+  ) +
+  labs(title = NULL, 
+       x = "Threshold Probability", 
+       y = "Net Benefit") +
+  # Apply minimalistic graphic theme
+  theme_classic() +
+  # Customize legend coordinates and formatting
+  theme(legend.position = c(0.85, 0.75),
+        legend.background = element_blank(),
+        legend.box.background = element_blank())
+```
+
+```{r age_sex_violin, echo=TRUE, warning=FALSE, message=FALSE, fig.width=8, fig.height=6}
+# ==============================================================
+# DEMOGRAPHICS: VIOLIN PLOT (AGE & SEX)
+# ==============================================================
+library(ggplot2)
+library(dplyr)
+
+# Extract and label Sex variable
+df_violin <- data_clean %>%
+  filter(!is.na(gioi) & !is.na(tuoi)) %>% 
+  mutate(gioi_factor = factor(gioi, levels = c(1, 2), labels = c("Male", "Female")))
+
+# Compute descriptive statistics (Median and IQR)
+summary_age <- df_violin %>%
+  group_by(gioi_factor) %>%
+  summarise(
+    median_age = median(tuoi),
+    iqr_age = IQR(tuoi)
+  ) %>%
+  mutate(
+    label_text = sprintf("%.0f (%.3g)", median_age, iqr_age)
+  )
+
+# Visualize
+ggplot(df_violin, aes(x = gioi_factor, y = tuoi, fill = gioi_factor)) +
+  geom_violin(trim = FALSE, alpha = 0.7, color = "darkgrey") +
+  geom_boxplot(width = 0.15, fill = "white", color = "black", 
+               outlier.shape = NA, fatten = 2) +
+  geom_text(data = summary_age,
+            aes(x = gioi_factor, y = median_age, label = label_text),
+            nudge_x = 0.1,      
+            hjust = 0,          
+            size = 4, 
+            fontface = "bold") + 
+  scale_fill_manual(values = c("Male" = "#99d8c9", "Female" = "#fcbba1")) +
+  scale_y_continuous(breaks = seq(0, 120, by = 30), limits = c(0, 120)) +
+  labs(x = "Sex", y = "Age (years)") +
+  theme_minimal() +
+  theme(
+    legend.position = "none",             
+    panel.grid.major.x = element_blank(), 
+    panel.grid.minor = element_blank(),   
+    axis.title.x = element_text(fontface = "bold", margin = margin(t = 10)),
+    axis.title.y = element_text(fontface = "bold", margin = margin(r = 10)),
+    axis.text = element_text(color = "black", size = 11)
+  )
+```
+
+```{r air_violin, echo=TRUE, warning=FALSE, message=FALSE, fig.width=8, fig.height=6}
+# ==============================================================
+# CLINICAL FEATURES: VIOLIN PLOT (AIR SCORE BY OUTCOME)
+# ==============================================================
+
+# Extract, label, and order Outcome variable
+df_air <- data_clean %>%
+  filter(!is.na(GPB) & !is.na(AIR)) %>% 
+  mutate(GPB_factor = factor(GPB, levels = c(1, 0), labels = c("Complicated", "Uncomplicated")))
+
+# Compute descriptive statistics (Median and IQR)
+summary_air <- df_air %>%
+  group_by(GPB_factor) %>%
+  summarise(
+    median_air = median(AIR),
+    iqr_air = IQR(AIR)
+  ) %>%
+  mutate(
+    label_text = sprintf("%.0f (%.0f)", median_air, iqr_air)
+  )
+
+# Visualize
+ggplot(df_air, aes(x = GPB_factor, y = AIR, fill = GPB_factor)) +
+  geom_violin(trim = FALSE, alpha = 0.8, color = "darkgrey") +
+  geom_boxplot(width = 0.15, fill = "white", color = "black", 
+               outlier.shape = NA, fatten = 2) +
+  geom_text(data = summary_air,
+            aes(x = GPB_factor, y = median_air, label = label_text),
+            nudge_x = 0.12,     
+            hjust = 0,          
+            size = 4, 
+            fontface = "bold") + 
+  scale_fill_manual(values = c("Complicated" = "#ff9999", "Uncomplicated" = "#99ccff")) +
+  scale_y_continuous(breaks = seq(2.5, 12.5, by = 2.5), limits = c(1, 13)) +
+  labs(x = "Appendicitis Outcome", y = "AIR Score") +
+  theme_minimal() +
+  theme(
+    legend.position = "none",             
+    panel.grid.major.x = element_blank(), 
+    panel.grid.minor = element_blank(),   
+    axis.title.x = element_text(fontface = "bold", margin = margin(t = 10)),
+    axis.title.y = element_text(fontface = "bold", margin = margin(r = 10)),
+    axis.text = element_text(color = "black", size = 11)
+  )
+```
+
+```{r diameter_violin, echo=TRUE, warning=FALSE, message=FALSE, fig.width=8, fig.height=6}
+# ==============================================================
+# IMAGING FEATURES: VIOLIN PLOT (APPENDIX DIAMETER BY OUTCOME)
+# ==============================================================
+
+df_dk <- data_clean %>%
+  filter(!is.na(GPB) & !is.na(dkruotthua)) %>% 
+  mutate(GPB_factor = factor(GPB, levels = c(1, 0), labels = c("Complicated", "Uncomplicated")))
+
+summary_dk <- df_dk %>%
+  group_by(GPB_factor) %>%
+  summarise(
+    median_dk = median(dkruotthua),
+    iqr_dk = IQR(dkruotthua)
+  ) %>%
+  mutate(
+    label_text = sprintf("%.1f (%g)", median_dk, iqr_dk)
+  )
+
+ggplot(df_dk, aes(x = GPB_factor, y = dkruotthua, fill = GPB_factor)) +
+  geom_violin(trim = FALSE, alpha = 0.8, color = "darkgrey") +
+  geom_boxplot(width = 0.15, fill = "white", color = "black", 
+               outlier.color = "red", outlier.shape = 16, outlier.size = 1.5, fatten = 2) +
+  geom_text(data = summary_dk,
+            aes(x = GPB_factor, y = median_dk, label = label_text),
+            nudge_x = 0.12,
+            hjust = 0,          
+            size = 4, 
+            fontface = "bold") + 
+  scale_fill_manual(values = c("Complicated" = "#ff9999", "Uncomplicated" = "#99ccff")) +
+  scale_y_continuous(breaks = seq(5, 25, by = 5)) +
+  labs(x = "Appendicitis Outcome", y = "Appendix Diameter (mm)") +
+  theme_minimal() +
+  theme(
+    legend.position = "none",             
+    panel.grid.major.x = element_blank(), 
+    panel.grid.minor = element_blank(),   
+    axis.title.x = element_text(fontface = "bold", margin = margin(t = 10)),
+    axis.title.y = element_text(fontface = "bold", margin = margin(r = 10)),
+    axis.text = element_text(color = "black", size = 11)
+  )
+```
+
+```{r roc_air_plot, echo=TRUE, warning=FALSE, message=FALSE, fig.width=6, fig.height=6}
+# ==============================================================
+# ROC CURVE: AIR SCORE 
+# ==============================================================
+library(pROC)
+library(ggplot2)
+
+roc_air <- roc(data_clean$GPB, data_clean$AIR, quiet = TRUE)
+
+roc_data <- data.frame(
+  FPR = 1 - roc_air$specificities,
+  TPR = roc_air$sensitivities
+)
+
+auc_val <- as.numeric(auc(roc_air))
+auc_text <- paste0("AUC: ", sprintf("%.3f", auc_val))
+
+# Calculate coordinates for optimal cut-off (6.5)
+coord_cutoff <- coords(roc_air, x = 6.5, input = "threshold", ret = c("specificity", "sensitivity"), transpose = FALSE)
+cutoff_fpr <- 1 - coord_cutoff$specificity[1]
+cutoff_tpr <- coord_cutoff$sensitivity[1]
+
+ggplot(data = roc_data, aes(x = FPR, y = TPR)) +
+  geom_abline(intercept = 0, slope = 1, color = "#4daf4a", linewidth = 0.5) +
+  geom_line(color = "#377eb8", linewidth = 1) +
+  geom_point(x = cutoff_fpr, y = cutoff_tpr, color = "red", size = 2.5) +
+  annotate("text", x = cutoff_fpr + 0.12, y = cutoff_tpr - 0.05, 
+           label = "Cut-off: > 6.5", color = "red", fontface = "italic", size = 4) +
+  annotate("text", x = 0.5, y = 0.4, 
+           label = auc_text, color = "black", fontface = "bold", size = 5) +
+  scale_x_continuous(breaks = seq(0, 1, by = 0.2), limits = c(0, 1), expand = c(0, 0)) +
+  scale_y_continuous(breaks = seq(0, 1, by = 0.2), limits = c(0, 1), expand = c(0, 0)) +
+  labs(x = "1 - Specificity", y = "Sensitivity") +
+  theme_gray() +
+  theme(
+    panel.border = element_rect(color = "black", fill = NA, linewidth = 1),
+    axis.title.x = element_text(fontface = "bold", margin = margin(t = 10)),
+    axis.title.y = element_text(fontface = "bold", margin = margin(r = 10)),
+    axis.text = element_text(color = "black")
+  )
+```
+
+```{r roc_combine, echo=TRUE, warning=FALSE, message=FALSE, fig.width=10, fig.height=5}
+# ==============================================================
+# COMBINED ROC CURVES: APPENDICEAL AND CECAL WALL THICKNESS
+# ==============================================================
+if(!require(patchwork)) install.packages("patchwork")
+library(patchwork) 
+
+# --- PLOT A: Appendiceal Wall Thickness ---
+roc_rt <- roc(data_clean$GPB, data_clean$dthanhruotthua, quiet = TRUE)
+data_rt <- data.frame(FPR = 1 - roc_rt$specificities, TPR = roc_rt$sensitivities)
+auc_rt <- as.numeric(auc(roc_rt))
+auc_text_rt <- paste0("AUC: ", sprintf("%.3f", auc_rt))
+
+coord_rt <- coords(roc_rt, x = 3.2, input = "threshold", ret = c("specificity", "sensitivity"), transpose = FALSE)
+fpr_rt <- 1 - coord_rt$specificity[1]
+tpr_rt <- coord_rt$sensitivity[1]
+
+plot_a <- ggplot(data = data_rt, aes(x = FPR, y = TPR)) +
+  geom_abline(intercept = 0, slope = 1, color = "#4daf4a", linewidth = 0.5) +
+  geom_line(color = "#377eb8", linewidth = 1) +
+  geom_point(x = fpr_rt, y = tpr_rt, color = "red", size = 2.5) +
+  annotate("text", x = fpr_rt + 0.1, y = tpr_rt - 0.05, label = "> 3.2", color = "red", fontface = "italic", size = 4) +
+  annotate("text", x = 0.5, y = 0.35, label = auc_text_rt, color = "black", fontface = "bold", size = 4.5) +
+  scale_x_continuous(breaks = seq(0, 1, by = 0.2), limits = c(0, 1), expand = c(0, 0)) +
+  scale_y_continuous(breaks = seq(0, 1, by = 0.2), limits = c(0, 1), expand = c(0, 0)) +
+  labs(title = "A. Appendiceal Wall Thickness", x = "1 - Specificity", y = "Sensitivity") +
+  theme_gray() +
+  theme(
+    plot.title = element_text(face = "bold", hjust = 0.5, size = 10),
+    panel.border = element_rect(color = "black", fill = NA, linewidth = 1),
+    axis.title.x = element_text(fontface = "bold", margin = margin(t = 10)),
+    axis.title.y = element_text(fontface = "bold", margin = margin(r = 10)),
+    axis.text = element_text(color = "black")
+  )
+
+# --- PLOT B: Cecal Wall Thickness ---
+roc_mt <- roc(data_clean$GPB, data_clean$dmanhtrang, quiet = TRUE)
+data_mt <- data.frame(FPR = 1 - roc_mt$specificities, TPR = roc_mt$sensitivities)
+auc_mt <- as.numeric(auc(roc_mt))
+auc_text_mt <- paste0("AUC: ", sprintf("%.3f", auc_mt))
+
+coord_mt <- coords(roc_mt, x = 7.2, input = "threshold", ret = c("specificity", "sensitivity"), transpose = FALSE)
+fpr_mt <- 1 - coord_mt$specificity[1]
+tpr_mt <- coord_mt$sensitivity[1]
+
+plot_b <- ggplot(data = data_mt, aes(x = FPR, y = TPR)) +
+  geom_abline(intercept = 0, slope = 1, color = "#4daf4a", linewidth = 0.5) +
+  geom_line(color = "#377eb8", linewidth = 1) +
+  geom_point(x = fpr_mt, y = tpr_mt, color = "red", size = 2.5) +
+  annotate("text", x = fpr_mt + 0.1, y = tpr_mt - 0.05, label = "> 7.2", color = "red", fontface = "italic", size = 4) +
+  annotate("text", x = 0.5, y = 0.35, label = auc_text_mt, color = "black", fontface = "bold", size = 4.5) +
+  scale_x_continuous(breaks = seq(0, 1, by = 0.2), limits = c(0, 1), expand = c(0, 0)) +
+  scale_y_continuous(breaks = seq(0, 1, by = 0.2), limits = c(0, 1), expand = c(0, 0)) +
+  labs(title = "B. Cecal Wall Thickness", x = "1 - Specificity", y = "Sensitivity") +
+  theme_gray() +
+  theme(
+    plot.title = element_text(face = "bold", hjust = 0.5, size = 10),
+    panel.border = element_rect(color = "black", fill = NA, linewidth = 1),
+    axis.title.x = element_text(fontface = "bold", margin = margin(t = 10)),
+    axis.title.y = element_text(fontface = "bold", margin = margin(r = 10)),
+    axis.text = element_text(color = "black")
+  )
+
+# Display side-by-side
+plot_a + plot_b
+```
+
+```{r table_clinical, echo=TRUE, warning=FALSE, message=FALSE}
+# ==============================================================
+# DESCRIPTIVE STATISTICS: CLINICAL AND LABORATORY CHARACTERISTICS
+# ==============================================================
+if(!require(gtsummary)) install.packages("gtsummary")
+library(gtsummary)
+library(dplyr)
+
+df_table31 <- data_clean %>%
+  select(GPB, gioi, non, dauhcp, sot, phanungdoi, soluongBC, phantramNEU, nguongcrp) %>%
+  mutate(GPB = ifelse(GPB == 2, 0, GPB)) %>%
+  mutate(
+    GPB = factor(GPB, levels = c(1, 0), labels = c("Complicated", "Uncomplicated")),
+    gioi = factor(gioi, levels = c(1, 2), labels = c("Male", "Female")),
+    non = factor(non, levels = c(1, 2), labels = c("Vomiting", "No vomiting")),
+    dauhcp = factor(dauhcp, levels = c(1, 2), labels = c("RLQ pain", "No RLQ pain")),
+    sot = factor(sot, levels = c(1, 2), labels = c("Fever", "No fever")),
+    phanungdoi = factor(phanungdoi, levels = c(1, 2, 3, 4), labels = c("Mild", "Moderate", "Severe", "None")),
+    soluongBC = factor(soluongBC, levels = c(1, 2, 3), labels = c("10 - 14.9 K/mcL", "\u2265 15 K/mcL", "< 10 K/mcL")),
+    phantramNEU = factor(phantramNEU, levels = c(1, 2, 3), labels = c("70 - 84%", "\u2265 85%", "< 70%")),
+    nguongcrp = factor(nguongcrp, levels = c(1, 2, 3), labels = c("10 - 49 mg/L", "\u2265 50 mg/L", "< 10 mg/L"))
+  )
+
+table_31 <- df_table31 %>%
+  tbl_summary(
+    by = GPB,
+    label = list(
+      gioi ~ "Sex",
+      non ~ "Vomiting",
+      dauhcp ~ "Right lower quadrant pain",
+      sot ~ "Fever (> 38.5°C)",
+      phanungdoi ~ "Rebound tenderness",
+      soluongBC ~ "WBC count",
+      phantramNEU ~ "Neutrophil percentage",
+      nguongcrp ~ "CRP levels"
+    ),
+    statistic = all_categorical() ~ "{n} ({p}%)", 
+    digits = all_categorical() ~ c(0, 1), 
+    missing = "no" 
+  ) %>%
+  add_p(
+    test = all_categorical() ~ "chisq.test",
+    test.args = all_categorical() ~ list(correct = TRUE), 
+    pvalue_fun = function(x) style_pvalue(x, digits = 3)  
+  ) %>% 
+  modify_header(
+    label = "**Variables**",
+    stat_1 = "**Complicated**\n**(n={n})**",
+    stat_2 = "**Uncomplicated**\n**(n={n})**",
+    p.value = "**p-value***"
+  ) %>%
+  modify_footnote(
+    p.value ~ "* p-values computed using Pearson's Chi-squared test with Yates' continuity correction or Fisher's exact test."
+  ) %>%
+  bold_labels()
+
+table_31
+```
+
+```{r table_continuous, echo=TRUE, warning=FALSE, message=FALSE}
+# ==============================================================
+# DESCRIPTIVE STATISTICS: CONTINUOUS VARIABLES
+# ==============================================================
+df_table32 <- data_clean %>%
+  select(GPB, tuoi, crp) %>%
+  mutate(
+    GPB = ifelse(GPB == 2, 0, GPB),
+    GPB = factor(GPB, levels = c(1, 0), labels = c("Complicated", "Uncomplicated"))
+  )
+
+table_32 <- df_table32 %>%
+  tbl_summary(
+    by = GPB,
+    label = list(
+      tuoi ~ "Age (years)",
+      crp ~ "CRP value (mg/L)"
+    ),
+    type = all_continuous() ~ "continuous", 
+    statistic = all_continuous() ~ "{median} ({IQR})",
+    digits = all_continuous() ~ 1, 
+    missing = "no"
+  ) %>%
+  add_p(
+    test = all_continuous() ~ "wilcox.test", 
+    pvalue_fun = function(x) style_pvalue(x, digits = 3)
+  ) %>%
+  modify_header(
+    label = "**Variables**",
+    stat_1 = "**Complicated (n={n})**\n**Median (IQR)**",
+    stat_2 = "**Uncomplicated (n={n})**\n**Median (IQR)**",
+    p.value = "**p-value***"
+  ) %>%
+  modify_footnote(
+    p.value ~ "*Data presented as Median (Interquartile Range); p-values computed using Mann-Whitney U test."
+  ) %>%
+  bold_labels()
+
+table_32
+```
+
+```{r table_kappa, echo=TRUE, warning=FALSE, message=FALSE}
+# ==============================================================
+# INTER-RATER RELIABILITY: COHEN'S KAPPA (CATEGORICAL CT FEATURES)
+# ==============================================================
+if(!require(irr)) install.packages("irr")
+if(!require(vcd)) install.packages("vcd")
+if(!require(flextable)) install.packages("flextable")
+
+library(haven)
+library(irr)
+library(vcd)
+library(flextable)
+
+data_icc <- read_sav("D:/NghienCuu/ICC.sav")
+
+var_list <- list(
+  c("TNM", "TNMCK2", "Fat stranding severity"),
+  c("Matlientuc", "matlientucck2", "Loss of wall continuity"),
+  c("daymanhtrang", "daymanhtrangck2", "Cecal wall thickening"),
+  c("Batthuockem", "batthuockemck2", "Decreased wall enhancement"),
+  c("Khitrong", "khitrongck2", "Intraluminal air"),
+  c("Khingoai", "khingoaick2", "Extraluminal air"),
+  c("dichkhutru", "dichkhutruck2", "Localized fluid"),
+  c("dichtudo", "dichtudock2", "Free fluid"),
+  c("hachviem", "hachviemck2", "Lymphadenopathy"), 
+  c("Tacruot", "tacruotck2", "Small bowel obstruction"),
+  c("apxe", "apxeck2", "Periappendiceal abscess"),
+  c("Soitrong", "soitrongck2", "Appendicolith"),
+  c("Soingoai", "soingoaick2", "Extraluminal appendicolith")
+)
+
+results <- data.frame()
+
+for(item in var_list) {
+  v1 <- item[1]
+  v2 <- item[2]
+  name <- item[3]
+  
+  df_pair <- data_icc[, c(v1, v2)]
+  df_pair <- na.omit(df_pair)
+  
+  k_irr <- kappa2(df_pair)
+  z_val <- k_irr$statistic
+  p_val <- k_irr$p.value
+  
+  lvls <- sort(unique(c(df_pair[[1]], df_pair[[2]])))
+  f1 <- factor(df_pair[[1]], levels = lvls)
+  f2 <- factor(df_pair[[2]], levels = lvls)
+  tab <- table(f1, f2)
+  
+  k_vcd <- suppressWarnings(Kappa(tab))
+  kappa_val <- k_vcd$Unweighted[1]
+  se_val <- k_vcd$Unweighted[2]
+  
+  ci_lower <- kappa_val - 1.96 * se_val
+  ci_upper <- kappa_val + 1.96 * se_val
+  if(ci_upper > 1) ci_upper <- 1 
+  
+  kappa_str <- sprintf("%.2f", kappa_val)
+  se_str <- sprintf("%.2f", se_val)
+  ci_str <- sprintf("[%0.2f - %0.2f]", ci_lower, ci_upper)
+  z_str <- sprintf("%.2f", z_val)
+  p_str <- ifelse(p_val < 0.001, "<0.001", sprintf("%.3f", p_val))
+  
+  results <- rbind(results, data.frame(
+    Feature = name,
+    Kappa = kappa_str,
+    SE = se_str,
+    CI = ci_str,
+    Z = z_str,
+    p = p_str
+  ))
+}
+
+table_33 <- results %>%
+  flextable() %>%
+  set_header_labels(
+    Feature = "CT Feature",
+    Kappa = "Kappa\nValue",
+    SE = "Standard\nError",
+    CI = "95% CI",
+    Z = "Z Value",
+    p = "p-value"
+  ) %>%
+  bold(part = "header") %>%
+  align(j = 1, align = "left", part = "all") %>%
+  align(j = 2:6, align = "center", part = "all") %>%
+  width(j = 1, width = 2.5) %>%
+  width(j = 2:6, width = 1) %>%
+  theme_booktabs() %>%
+  add_footer_lines("Note: Inter-rater agreement for categorical features evaluated using Cohen's Kappa coefficient (estimated via Z-test).") %>%
+  font(fontname = "Arial", part = "all") %>%
+  fontsize(size = 10, part = "all")
+
+table_33
+```
+
+```{r table_icc, echo=TRUE, warning=FALSE, message=FALSE}
+# ==============================================================
+# INTER-RATER RELIABILITY: ICC (CONTINUOUS CT FEATURES)
+# ==============================================================
+library(irr)
+library(flextable)
+
+var_list_icc <- list(
+  c("dkruotthua", "dkrtck2", "Appendix diameter"),
+  c("dthanhruotthua", "drtck2", "Appendiceal wall thickness"),
+  c("dmanhtrang", "dmtck2", "Cecal wall thickness")
+)
+
+results_icc <- data.frame()
+
+for(item in var_list_icc) {
+  v1 <- item[1]
+  v2 <- item[2]
+  name <- item[3]
+  
+  df_pair <- data_icc[, c(v1, v2)]
+  df_pair <- na.omit(df_pair)
+  
+  icc_single <- icc(df_pair, model = "twoway", type = "agreement", unit = "single")
+  icc_avg <- icc(df_pair, model = "twoway", type = "agreement", unit = "average")
+  
+  val_s <- sprintf("%.2f", icc_single$value)
+  ci_s <- sprintf("%.2f - %.2f", icc_single$lbound, icc_single$ubound)
+  
+  val_a <- sprintf("%.2f", icc_avg$value)
+  ci_a <- sprintf("%.2f - %.2f", icc_avg$lbound, icc_avg$ubound)
+  
+  results_icc <- rbind(results_icc, data.frame(
+    Test = name,
+    ICC_don = val_s,
+    KTC_don = ci_s,
+    ICC_tb = val_a,
+    KTC_tb = ci_a
+  ))
+}
+
+table_34 <- results_icc %>%
+  flextable() %>%
+  set_header_labels(
+    Test = "Variable",
+    ICC_don = "Single ICC",
+    KTC_don = "95% CI",
+    ICC_tb = "Average ICC",
+    KTC_tb = "95% CI"
+  ) %>%
+  bold(part = "header") %>%
+  align(j = 1, align = "left", part = "all") %>%
+  align(j = 2:5, align = "center", part = "all") %>%
+  width(j = 1, width = 2.2) %>%
+  width(j = 2:5, width = 1.2) %>%
+  theme_booktabs() %>%
+  add_footer_lines("Note: p < 0.001 for all Intraclass Correlation Coefficient (ICC) F-tests.") %>%
+  italic(part = "footer") %>%
+  font(fontname = "Arial", part = "all") %>%
+  fontsize(size = 10, part = "all")
+
+table_34
+```
+
+```{r table_univariate, echo=TRUE, warning=FALSE, message=FALSE}
+# ==============================================================
+# UNIVARIABLE LOGISTIC REGRESSION: CT IMAGING FEATURES
+# ==============================================================
+if(!require(logistf)) install.packages("logistf")
+library(gtsummary)
+library(dplyr)
+library(flextable)
+library(logistf) 
+
+df_uv_ct <- data_clean %>%
+  select(GPB, tttnm, nguongtnm, Khitrong, Soitrong, hachviem, dichkhutru, dichtudo) %>%
+  mutate(
+    GPB_factor = factor(ifelse(GPB %in% c(1), 1, 0), levels = c(1, 0), labels = c("Complicated", "Uncomplicated")),
+    GPB_num = ifelse(GPB %in% c(1), 1, 0),
+    
+    tttnm_cat = factor(ifelse(tttnm %in% c(1), "Present", "Absent"), levels = c("Absent", "Present")),
+    nguongtnm_cat = factor(ifelse(nguongtnm %in% c(1), "Present", "Absent"), levels = c("Absent", "Present")),
+    Khitrong_cat = factor(ifelse(Khitrong %in% c(1), "Present", "Absent"), levels = c("Absent", "Present")),
+    Soitrong_cat = factor(ifelse(Soitrong %in% c(1), "Present", "Absent"), levels = c("Absent", "Present")),
+    hachviem_cat = factor(ifelse(hachviem %in% c(1), "Present", "Absent"), levels = c("Absent", "Present")),
+    dichkhutru_cat = factor(ifelse(dichkhutru %in% c(1), "Present", "Absent"), levels = c("Absent", "Present")),
+    dichtudo_cat = factor(ifelse(dichtudo %in% c(1), "Present", "Absent"), levels = c("Absent", "Present"))
+  )
+
+# Frequencies
+t1_counts_ct <- df_uv_ct %>%
+  select(GPB_factor, tttnm_cat, nguongtnm_cat, Khitrong_cat, Soitrong_cat, hachviem_cat, dichkhutru_cat, dichtudo_cat) %>%
+  tbl_summary(
+    by = GPB_factor,
+    type = list(everything() ~ "dichotomous"),
+    value = list(everything() ~ "Present"),
+    label = list(
+      tttnm_cat ~ "Any fat stranding*",
+      nguongtnm_cat ~ "Circumferential fat stranding",
+      Khitrong_cat ~ "Intraluminal air",
+      Soitrong_cat ~ "Appendicolith",
+      hachviem_cat ~ "Lymphadenopathy",
+      dichkhutru_cat ~ "Localized periappendiceal fluid",
+      dichtudo_cat ~ "Free fluid"
+    ),
+    statistic = all_categorical() ~ "{n} ({p}%)",
+    digits = all_categorical() ~ c(0, 1)
+  )
+
+# Firth's Penalized Likelihood Regression (To handle complete separation)
+t2_firth <- df_uv_ct %>%
+  select(GPB_num, tttnm_cat) %>%
+  tbl_uvregression(
+    method = logistf, 
+    y = GPB_num,
+    exponentiate = TRUE, 
+    hide_n = TRUE,
+    show_single_row = everything(),
+    label = list(tttnm_cat ~ "Any fat stranding*")
+  )
+
+# Standard Binary Logistic Regression
+t2_glm <- df_uv_ct %>%
+  select(GPB_num, nguongtnm_cat, Khitrong_cat, Soitrong_cat, hachviem_cat, dichkhutru_cat, dichtudo_cat) %>%
+  tbl_uvregression(
+    method = glm,
+    y = GPB_num,
+    method.args = list(family = binomial),
+    exponentiate = TRUE, 
+    hide_n = TRUE,
+    show_single_row = everything(),
+    label = list(
+      nguongtnm_cat ~ "Circumferential fat stranding",
+      Khitrong_cat ~ "Intraluminal air",
+      Soitrong_cat ~ "Appendicolith",
+      hachviem_cat ~ "Lymphadenopathy",
+      dichkhutru_cat ~ "Localized periappendiceal fluid",
+      dichtudo_cat ~ "Free fluid"
+    ),
+    pvalue_fun = function(x) style_pvalue(x, digits = 3)
+  )
+
+# Merge
+t2_combined <- tbl_stack(list(t2_firth, t2_glm))
+
+table_311 <- tbl_merge(
+  tbls = list(t1_counts_ct, t2_combined),
+  tab_spanner = FALSE
+) %>%
+  modify_header(
+    label = "**CT Feature**",
+    stat_1_1 = "**Complicated**\n**(n={n})**",
+    stat_2_1 = "**Uncomplicated**\n**(n={n})**",
+    estimate_2 = "**OR**",
+    ci_2 = "**95% CI**",
+    p.value_2 = "**p-value**"
+  ) %>%
+  modify_column_hide(columns = any_of(c("ci_1", "ci_2_1", "ci_1_2", "conf.low", "conf.high", "p.value_1"))) %>%
+  modify_footnote(
+    everything() ~ NA, 
+    p.value_2 ~ "*OR and 95% CI estimated via Firth's penalized likelihood approach. Other variables were analyzed using standard binary logistic regression."
+  ) %>%
+  bold_labels() %>%
+  as_flex_table() %>%
+  italic(part = "footer")
+
+table_311
+```
+
+```{r table_multivariable, echo=TRUE, warning=FALSE, message=FALSE}
+# ==============================================================
+# FINAL MULTIVARIABLE LOGISTIC REGRESSION MODEL (SCAP)
+# ==============================================================
+if(!require(broom)) install.packages("broom")
+library(dplyr)
+library(broom)
+library(flextable)
+
+# Initialize dataset for reduced model
+df_scap <- data_clean %>%
+  mutate(
+    GPB_num = ifelse(GPB %in% c(1), 1, 0),
+    dichkhutru_cat = factor(ifelse(dichkhutru %in% c(1), "Present", "Absent"), levels = c("Absent", "Present")),
+    nguongtnm_cat  = factor(ifelse(nguongtnm %in% c(1), "Present", "Absent"), levels = c("Absent", "Present")),
+    AIR_cat        = factor(ifelse(nguongAIR %in% c(1), "Present", "Absent"), levels = c("Absent", "Present")),
+    dkrt_cat       = factor(ifelse(dkruotthua > 11.5, "Present", "Absent"), levels = c("Absent", "Present")),
+    mt_cat         = factor(ifelse(dmanhtrang > 7.2, "Present", "Absent"), levels = c("Absent", "Present"))
+  )
+
+fit_scap <- glm(GPB_num ~ dichkhutru_cat + nguongtnm_cat + AIR_cat + dkrt_cat + mt_cat,
+                data = df_scap, family = binomial)
+
+# Profile Likelihood 95% Confidence Intervals
+ci_scap <- confint(fit_scap)
+
+res_scap <- tidy(fit_scap) %>%
+  mutate(
+    conf.low = ci_scap[, 1],
+    conf.high = ci_scap[, 2],
+    OR_val = exp(estimate),
+    CI_low = exp(conf.low),
+    CI_high = exp(conf.high),
+    
+    HeSo = sprintf("%.2f", estimate),
+    aOR = sprintf("%.2f", OR_val),
+    KTC = paste0(sprintf("%.2f", CI_low), " - ", sprintf("%.2f", CI_high)),
+    p = ifelse(p.value < 0.001, "< 0.001", sprintf("%.3f", p.value))
+  )
+
+res_scap <- res_scap %>%
+  mutate(
+    aOR = ifelse(term == "(Intercept)", "", aOR),
+    KTC = ifelse(term == "(Intercept)", "", KTC),
+    p = ifelse(term == "(Intercept)", "", p),
+    
+    DacDiem = case_when(
+      term == "dichkhutru_catPresent" ~ "Localized fluid",
+      term == "nguongtnm_catPresent"  ~ "Circumferential fat stranding",
+      term == "AIR_catPresent"        ~ "AIR score \u2265 7",
+      term == "dkrt_catPresent"       ~ "Appendix diameter > 11.5 mm",
+      term == "mt_catPresent"         ~ "Cecal wall thickness > 7.2 mm",
+      term == "(Intercept)"           ~ "Intercept",
+      TRUE ~ term
+    )
+  ) %>%
+  select(DacDiem, HeSo, aOR, KTC, p) %>%
+  arrange(match(DacDiem, c("Localized fluid", "Circumferential fat stranding", 
+                           "AIR score \u2265 7", "Appendix diameter > 11.5 mm", 
+                           "Cecal wall thickness > 7.2 mm", "Intercept")))
+
+table_319 <- flextable(res_scap) %>%
+  set_header_labels(
+    DacDiem = "Variable",
+    HeSo = "Coefficient (\u03B2)",
+    aOR = "Adjusted OR",
+    KTC = "95% CI",
+    p = "p-value"
+  ) %>%
+  bold(part = "header") %>%
+  align(j = 1, align = "left", part = "all") %>%
+  align(j = 2:5, align = "center", part = "all") %>%
+  width(j = 1, width = 2.4) %>%
+  width(j = 2:5, width = 1.0) %>%
+  theme_booktabs() %>%
+  add_footer_lines("Note: Adjusted Odds Ratios (aOR), 95% CIs, and p-values derived from multivariable logistic regression after backward elimination.") %>%
+  italic(part = "footer") %>%
+  font(fontname = "Arial", part = "all") %>%
+  fontsize(size = 10, part = "all")
+
+table_319
+```
+
+```{r plot_histogram, echo=TRUE, warning=FALSE, message=FALSE, fig.width=8, fig.height=5}
+# ==============================================================
+# MIRROR HISTOGRAM: PREDICTED PROBABILITY DISTRIBUTION
+# ==============================================================
+library(dplyr)
+library(ggplot2)
+
+prob_preds <- predict(fit_scap, type = "response")
+
+df_plot <- data.frame(
+  XacSuat = prob_preds,
+  GPB_thucte = factor(fit_scap$y, 
+                      levels = c(0, 1), 
+                      labels = c("Uncomplicated", "Complicated"))
+)
+
+plot_37 <- ggplot(df_plot, aes(x = XacSuat, fill = GPB_thucte)) +
+  geom_histogram(data = filter(df_plot, GPB_thucte == "Complicated"),
+                 aes(y = after_stat(count)), 
+                 binwidth = 0.02, color = "white", linewidth = 0.2) +
+  geom_histogram(data = filter(df_plot, GPB_thucte == "Uncomplicated"),
+                 aes(y = -after_stat(count)), 
+                 binwidth = 0.02, color = "white", linewidth = 0.2) +
+  geom_vline(xintercept = 0.5, color = "#e41a1c", linetype = "dashed", linewidth = 1.2) +
+  scale_fill_manual(values = c(
+    "Uncomplicated" = "#84c6bc",            
+    "Complicated" = "#1c5145" 
+  )) +
+  scale_y_continuous(
+    breaks = seq(-75, 75, by = 25), 
+    labels = abs, 
+    limits = c(-60, 45) 
+  ) +
+  scale_x_continuous(
+    breaks = c(0, 0.25, 0.5, 0.75), 
+    labels = c("0.00", "0.25", "0.50", "0.75"),
+    limits = c(-0.02, 1.02)
+  ) +
+  labs(
+    x = "Predicted probability",
+    y = "Count",
+    fill = "Histopathology result"
+  ) +
+  theme_minimal() +
+  theme(
+    legend.position = "bottom", 
+    legend.title = element_text(face = "bold", margin = margin(r = 10)),
+    axis.title.x = element_text(margin = margin(t = 15)),
+    axis.title.y = element_text(margin = margin(r = 15)),
+    panel.grid.minor = element_blank(), 
+    panel.grid.major.x = element_line(color = "grey90"), 
+    panel.grid.major.y = element_line(color = "grey90")  
+  )
+
+plot_37
+```
