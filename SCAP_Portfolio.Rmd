@@ -1216,3 +1216,63 @@ legend("bottomright",
        lwd = 3,                  # Độ dày đường kẻ trong chú thích
        cex = 1.1,                # Cỡ chữ của chú thích 
        bty = "n")                # Bỏ viền hộp chú thích
+
+# =====================================================================
+# VẼ BIỂU ĐỒ DCA (ĐƯỜNG CONG QUYẾT ĐỊNH) CHO CẢ 3 MÔ HÌNH
+# =====================================================================
+# Nếu máy chưa có các gói này, hãy chạy 2 lệnh cài đặt ở dưới (bỏ dấu #):
+# install.packages("dcurves")
+# install.packages("ggplot2")
+
+library(dcurves)
+library(ggplot2)
+library(dplyr)
+
+# 1. Tính toán xác suất dự báo cho 3 mô hình bằng hàm glm() tiêu chuẩn
+fit_air_glm <- glm(GPB ~ AIR, data = data_clean, family = binomial)
+fit_ct_glm <- glm(GPB ~ dichkhutru + nguongtnm + nguongdkrt + nguongmt, data = data_clean, family = binomial)
+fit_scap_glm <- glm(GPB ~ dichkhutru + nguongtnm + nguongdkrt + nguongmt + nguongAIR, data = data_clean, family = binomial)
+
+# 2. Đưa xác suất dự báo vào bộ dữ liệu data_clean
+data_clean$prob_air <- predict(fit_air_glm, type = "response")
+data_clean$prob_ct <- predict(fit_ct_glm, type = "response")
+data_clean$prob_scap <- predict(fit_scap_glm, type = "response")
+
+# 3. Phân tích đường cong quyết định (DCA) bằng gói dcurves
+dca_res <- dca(GPB ~ prob_air + prob_ct + prob_scap,
+               data = data_clean,
+               thresholds = seq(0, 0.9, by = 0.01),
+               label = list(prob_air = "Mô hình AIR",
+                            prob_ct = "Mô hình CLVT",
+                            prob_scap = "Mô hình SCAP"))
+
+# 4. Tạo đối tượng biểu đồ (lưu vào biến p, chưa in ra vội)
+p <- plot(dca_res)
+
+# 5. MẸO: Việt hóa "Treat All" và "Treat None" trực tiếp trên dữ liệu của biểu đồ
+levels(p$data$label)[levels(p$data$label) == "Treat All"] <- "Can thiệp tất cả"
+levels(p$data$label)[levels(p$data$label) == "Treat None"] <- "Không can thiệp"
+
+# 6. Vẽ và tùy chỉnh biểu đồ (Chỉnh kích thước chữ lớn, không tiêu đề)
+p +
+  ggtitle(NULL) + # Xóa hoàn toàn tiêu đề hình
+  labs(x = "Ngưỡng xác suất (Threshold Probability)",
+       y = "Lợi ích ròng (Net Benefit)",
+       color = "Chiến lược",     # Đổi tên Legend 
+       linetype = "Chiến lược") + # Đổi tên Legend
+  theme_classic() +
+  theme(
+    # Chỉnh cỡ chữ trục tọa độ
+    axis.text = element_text(size = 14, color = "black"), 
+    axis.title = element_text(size = 16, face = "bold", color = "black"), 
+    
+    # Chỉnh cỡ chữ hộp chú thích
+    legend.text = element_text(size = 14),                
+    legend.title = element_text(size = 16, face = "bold"),
+    
+    # Đưa hộp chú thích vào trong vùng trống của biểu đồ (Góc trên bên phải)
+    legend.position = c(0.75, 0.70),                      
+    legend.background = element_rect(fill = "white", color = "black", linewidth = 0.5)
+  ) +
+  # Cắt trục Y ở mức vừa phải để biểu đồ gọn đẹp
+  coord_cartesian(ylim = c(-0.05, 0.45))
