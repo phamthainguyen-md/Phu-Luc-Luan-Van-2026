@@ -1218,61 +1218,117 @@ legend("bottomright",
        bty = "n")                # Bỏ viền hộp chú thích
 
 # =====================================================================
-# VẼ BIỂU ĐỒ DCA (ĐƯỜNG CONG QUYẾT ĐỊNH) CHO CẢ 3 MÔ HÌNH
+# VẼ ĐƯỜNG CONG QUYẾT ĐỊNH HIỆU CHỈNH LẠC QUAN (OPTIMISM-CORRECTED DCA)
+# Dùng Bootstrap 2000 lần lặp - Biểu đồ thô (Raw) chuẩn xuất bản
 # =====================================================================
-# Nếu máy chưa có các gói này, hãy chạy 2 lệnh cài đặt ở dưới (bỏ dấu #):
-# install.packages("dcurves")
-# install.packages("ggplot2")
-
-library(dcurves)
 library(ggplot2)
 library(dplyr)
 
-# 1. Tính toán xác suất dự báo cho 3 mô hình bằng hàm glm() tiêu chuẩn
+# 1. Khởi tạo hàm tính Lợi ích ròng (Net Benefit)
+calc_nb <- function(pred_prob, outcome, thresholds) {
+  sapply(thresholds, function(pt) {
+    tp <- sum(pred_prob >= pt & outcome == 1)
+    fp <- sum(pred_prob >= pt & outcome == 0)
+    n <- length(outcome)
+    nb <- (tp / n) - (fp / n) * (pt / (1 - pt))
+    return(nb)
+  })
+}
+
+# 2. Định nghĩa các mô hình gốc trên tập dữ liệu data_clean
 fit_air_glm <- glm(GPB ~ AIR, data = data_clean, family = binomial)
 fit_ct_glm <- glm(GPB ~ dichkhutru + nguongtnm + nguongdkrt + nguongmt, data = data_clean, family = binomial)
 fit_scap_glm <- glm(GPB ~ dichkhutru + nguongtnm + nguongdkrt + nguongmt + nguongAIR, data = data_clean, family = binomial)
 
-# 2. Đưa xác suất dự báo vào bộ dữ liệu data_clean
-data_clean$prob_air <- predict(fit_air_glm, type = "response")
-data_clean$prob_ct <- predict(fit_ct_glm, type = "response")
-data_clean$prob_scap <- predict(fit_scap_glm, type = "response")
+# Cài đặt dải xác suất (ngưỡng 0 đến 90%)
+thresholds <- seq(0, 0.9, by = 0.01)
 
-# 3. Phân tích đường cong quyết định (DCA) bằng gói dcurves
-dca_res <- dca(GPB ~ prob_air + prob_ct + prob_scap,
-               data = data_clean,
-               thresholds = seq(0, 0.9, by = 0.01),
-               label = list(prob_air = "Mô hình AIR",
-                            prob_ct = "Mô hình CLVT",
-                            prob_scap = "Mô hình SCAP"))
+# 3. Tính Lợi ích ròng biểu kiến (Apparent NB)
+nb_app_air <- calc_nb(predict(fit_air_glm, type="response"), data_clean$GPB, thresholds)
+nb_app_ct <- calc_nb(predict(fit_ct_glm, type="response"), data_clean$GPB, thresholds)
+nb_app_scap <- calc_nb(predict(fit_scap_glm, type="response"), data_clean$GPB, thresholds)
 
-# 4. Tạo đối tượng biểu đồ (lưu vào biến p, chưa in ra vội)
-p <- plot(dca_res)
+# 4. Chạy Bootstrap để tính độ lạc quan (Optimism)
+# LƯU Ý: Quá trình lặp 2000 lần sẽ mất khoảng 1-2 phút tùy cấu hình máy. Vui lòng chờ!
+B <- 2000 
+opt_air <- matrix(0, nrow = B, ncol = length(thresholds))
+opt_ct <- matrix(0, nrow = B, ncol = length(thresholds))
+opt_scap <- matrix(0, nrow = B, ncol = length(thresholds))
 
-# 5. MẸO: Việt hóa "Treat All" và "Treat None" trực tiếp trên dữ liệu của biểu đồ
-levels(p$data$label)[levels(p$data$label) == "Treat All"] <- "Can thiệp tất cả"
-levels(p$data$label)[levels(p$data$label) == "Treat None"] <- "Không can thiệp"
+set.seed(123) # Khóa seed để kết quả cố định mỗi lần chạy
+for(i in 1:B) {
+  # Lấy mẫu Bootstrap có hoàn lại
+  boot_idx <- sample(1:nrow(data_clean), replace = TRUE)
+  boot_data <- data_clean[boot_idx, ]
+  
+  # Huấn luyện lại mô hình trên mẫu Bootstrap
+  boot_fit_air <- glm(formula(fit_air_glm), data = boot_data, family = binomial)
+  boot_fit_ct <- glm(formula(fit_ct_glm), data = boot_data, family = binomial)
+  boot_fit_scap <- glm(formula(fit_scap_glm), data = boot_data, family = binomial)
+  
+  # Tính NB trên tập Bootstrap (Bootstrap NB)
+  nb_boot_air <- calc_nb(predict(boot_fit_air, type="response"), boot_data$GPB, thresholds)
+  nb_boot_ct <- calc_nb(predict(boot_fit_ct, type="response"), boot_data$GPB, thresholds)
+  nb_boot_scap <- calc_nb(predict(boot_fit_scap, type="response"), boot_data$GPB, thresholds)
+  
+  # Tính NB trên tập dữ liệu gốc (Test NB)
+  nb_test_air <- calc_nb(predict(boot_fit_air, newdata=data_clean, type="response"), data_clean$GPB, thresholds)
+  nb_test_ct <- calc_nb(predict(boot_fit_ct, newdata=data_clean, type="response"), data_clean$GPB, thresholds)
+  nb_test_scap <- calc_nb(predict(boot_fit_scap, newdata=data_clean, type="response"), data_clean$GPB, thresholds)
+  
+  # Lạc quan = Bootstrap NB - Test NB
+  opt_air[i, ] <- nb_boot_air - nb_test_air
+  opt_ct[i, ] <- nb_boot_ct - nb_test_ct
+  opt_scap[i, ] <- nb_boot_scap - nb_test_scap
+}
 
-# 6. Vẽ và tùy chỉnh biểu đồ (Chỉnh kích thước chữ lớn, không tiêu đề)
-p +
-  ggtitle(NULL) + # Xóa hoàn toàn tiêu đề hình
+# 5. Tính Lợi ích ròng đã hiệu chỉnh (Optimism-Corrected NB)
+corr_nb_air <- nb_app_air - colMeans(opt_air, na.rm=TRUE)
+corr_nb_ct <- nb_app_ct - colMeans(opt_ct, na.rm=TRUE)
+corr_nb_scap <- nb_app_scap - colMeans(opt_scap, na.rm=TRUE)
+
+# Tính NB cho 2 đường tham chiếu
+prev <- mean(data_clean$GPB)
+nb_treat_all <- prev - (1 - prev) * (thresholds / (1 - thresholds))
+nb_treat_none <- rep(0, length(thresholds))
+
+# 6. Gom dữ liệu để chuẩn bị vẽ
+dca_df <- data.frame(
+  Threshold = rep(thresholds, 5),
+  NB = c(corr_nb_scap, corr_nb_ct, corr_nb_air, nb_treat_all, nb_treat_none),
+  Strategy = factor(rep(c("Mô hình SCAP", "Mô hình CLVT", "Mô hình AIR", "Can thiệp tất cả", "Không can thiệp"), 
+                        each = length(thresholds)),
+                    levels = c("Mô hình SCAP", "Mô hình CLVT", "Mô hình AIR", "Can thiệp tất cả", "Không can thiệp"))
+)
+
+# Cắt các giá trị âm sâu dưới -0.05 để biểu đồ không bị nhiễu
+dca_df$NB[dca_df$NB < -0.05] <- NA 
+
+# 7. Vẽ biểu đồ thô trung thực 100% bằng geom_line
+ggplot(dca_df, aes(x = Threshold, y = NB, color = Strategy, linetype = Strategy)) +
+  geom_line(linewidth = 1) + 
+  scale_color_manual(values = c("Mô hình SCAP" = "#C77CFF",        
+                                "Mô hình CLVT" = "#00BFC4",        
+                                "Mô hình AIR" = "#00BA38",         
+                                "Can thiệp tất cả" = "#F8766D",    
+                                "Không can thiệp" = "#B79F00")) +  
+  scale_linetype_manual(values = c("Mô hình SCAP" = "solid", 
+                                   "Mô hình CLVT" = "solid", 
+                                   "Mô hình AIR" = "solid", 
+                                   "Can thiệp tất cả" = "solid", 
+                                   "Không can thiệp" = "solid")) +
+  scale_x_continuous(labels = scales::percent_format(accuracy = 1)) +
   labs(x = "Ngưỡng xác suất (Threshold Probability)",
        y = "Lợi ích ròng (Net Benefit)",
-       color = "Chiến lược",     # Đổi tên Legend 
-       linetype = "Chiến lược") + # Đổi tên Legend
+       color = "Chiến lược",
+       linetype = "Chiến lược") +
   theme_classic() +
   theme(
-    # Chỉnh cỡ chữ trục tọa độ
     axis.text = element_text(size = 14, color = "black"), 
     axis.title = element_text(size = 16, face = "bold", color = "black"), 
-    
-    # Chỉnh cỡ chữ hộp chú thích
     legend.text = element_text(size = 14),                
     legend.title = element_text(size = 16, face = "bold"),
-    
-    # Đưa hộp chú thích vào trong vùng trống của biểu đồ (Góc trên bên phải)
     legend.position = c(0.75, 0.70),                      
     legend.background = element_rect(fill = "white", color = "black", linewidth = 0.5)
   ) +
-  # Cắt trục Y ở mức vừa phải để biểu đồ gọn đẹp
-  coord_cartesian(ylim = c(-0.05, 0.45))
+  coord_cartesian(ylim = c(-0.05, 0.45), xlim = c(0, 0.9))
