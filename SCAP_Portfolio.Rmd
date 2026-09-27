@@ -1060,3 +1060,159 @@ plot_37 <- ggplot(df_plot, aes(x = XacSuat, fill = GPB_thucte)) +
 
 plot_37
 ```
+
+# ======================================================================
+# BƯỚC 1: NẠP THƯ VIỆN & ĐỌC, LÀM SẠCH DỮ LIỆU
+# ======================================================================
+library(haven)    
+library(dplyr)    
+library(rms)      
+
+# Đọc file SPSS từ ổ đĩa D
+data_goc <- read_sav("D:/NghienCuu/Nghiencuu.sav")
+
+# Quy đổi giá trị 2 thành 0, lột nhãn SPSS và TỰ ĐỘNG CẮT LẠI NGƯỠNG ĐỊNH LƯỢNG
+data_clean <- data_goc %>%
+  mutate(
+    GPB          = as.numeric(ifelse(GPB == 2, 0, GPB)), 
+    
+    # Các biến định tính có sẵn (Quy giá trị 2 về 0)
+    nguongtuoi   = as.numeric(ifelse(nguongtuoi == 2, 0, nguongtuoi)),
+    Soitrong     = as.numeric(ifelse(Soitrong == 2, 0, Soitrong)),
+    nguongtnm    = as.numeric(ifelse(nguongtnm == 2, 0, nguongtnm)),
+    Khitrong     = as.numeric(ifelse(Khitrong == 2, 0, Khitrong)),
+    hachviem     = as.numeric(ifelse(hachviem == 2, 0, hachviem)),
+    dichtudo     = as.numeric(ifelse(dichtudo == 2, 0, dichtudo)),
+    dichkhutru   = as.numeric(ifelse(dichkhutru == 2, 0, dichkhutru)),
+    nguongAIR    = as.numeric(ifelse(nguongAIR == 2, 0, nguongAIR)),
+    
+    # CẮT NGƯỠNG TRỰC TIẾP TỪ BIẾN ĐỊNH LƯỢNG GỐC ĐỂ ĐẢM BẢO CHÍNH XÁC 100%
+    nguongdkrt   = as.numeric(ifelse(dkruotthua > 11.5, 1, 0)),
+    nguongmt     = as.numeric(ifelse(dmanhtrang > 7.2, 1, 0)) 
+  )
+
+# =====================================================================
+# BƯỚC 2: THIẾT LẬP MÔI TRƯỜNG CHO GÓI RMS
+# =====================================================================
+dd <- datadist(data_clean)
+options(datadist="dd")
+
+# =====================================================================
+# BƯỚC 3: KHỞI TẠO 3 MÔ HÌNH BẰNG HÀM lrm
+# =====================================================================
+fit_air <- lrm(GPB ~ AIR, data = data_clean, x = TRUE, y = TRUE)
+fit_ct <- lrm(GPB ~ dichkhutru + nguongtnm + nguongdkrt + nguongmt, data = data_clean, x = TRUE, y = TRUE)
+fit_scap <- lrm(GPB ~ dichkhutru + nguongtnm + nguongdkrt + nguongmt + nguongAIR, data = data_clean, x = TRUE, y = TRUE)
+
+# =====================================================================
+# BƯỚC 4: CHẠY BOOTSTRAP 2000 LẦN CHO CẢ 3 MÔ HÌNH
+# =====================================================================
+set.seed(123) 
+cal_air <- calibrate(fit_air, method = "boot", B = 2000)
+cal_ct <- calibrate(fit_ct, method = "boot", B = 2000)
+cal_scap <- calibrate(fit_scap, method = "boot", B = 2000)
+
+val_air <- validate(fit_air, B = 2000)
+val_ct <- validate(fit_ct, B = 2000)
+val_scap <- validate(fit_scap, B = 2000)
+
+# =====================================================================
+# BƯỚC 5: XUẤT 3 BIỂU ĐỒ TRÊN CÙNG 1 KHUNG HÌNH SẠCH ĐẸP
+# =====================================================================
+par(mfrow = c(1, 3), mar = c(5, 5, 2, 2), cex.axis = 1.2, cex.lab = 1.3)
+
+plot_cal <- function(cal_obj, label_text) {
+  plot(cal_obj, 
+       main = "", 
+       xlab = "Xác suất dự đoán (Predicted Probability)", 
+       ylab = "Tỷ lệ quan sát thực tế (Observed Proportion)",
+       xlim = c(0, 1), ylim = c(0, 1),
+       scat1d.opts = list(frac = 0.05, lwd = 1.5), 
+       subtitles = FALSE, 
+       legend = FALSE) # ĐÃ THÊM: Tắt chú thích tiếng Anh mặc định
+  
+  # Gắn nhãn (A), (B), (C)
+  mtext(label_text, side = 3, adj = -0.1, line = 0.5, cex = 1.5, font = 2)
+  
+  # ĐÃ SỬA: Chú thích tiếng Việt khớp hoàn toàn với màu đen và kiểu nét vẽ
+  legend("bottomright", 
+         legend = c("Lý tưởng (Ideal)", "Biểu kiến (Apparent)", "Đã hiệu chỉnh (Bias-corrected)"),
+         lty = c(2, 3, 1), # Khớp: Nét đứt (2), Nét chấm (3), Nét liền (1)
+         col = c("black", "black", "black"), # Đổi toàn bộ thành màu đen
+         lwd = c(1, 1, 2), 
+         bty = "n", cex = 1.1)
+}
+
+plot_cal(cal_air, "(A)")
+plot_cal(cal_ct, "(B)")
+plot_cal(cal_scap, "(C)")
+
+par(mfrow = c(1, 1))
+
+# =====================================================================
+# BƯỚC 6: TRÍCH XUẤT CÁC CHỈ SỐ CHUYÊN SÂU
+# =====================================================================
+get_metrics <- function(fit, val, cal, model_name) {
+  p <- predict(fit, type = "fitted")
+  y <- as.numeric(fit$y)
+  brier <- mean((p - y)^2)
+  
+  dxy_optimism_corrected <- val["Dxy", "index.corrected"]
+  auc_corrected <- dxy_optimism_corrected / 2 + 0.5
+  
+  intercept <- cal[,"calibrated.orig"][1] 
+  slope <- val["Slope", "index.corrected"]
+  
+  cat(sprintf("\n--- %s ---\n", model_name))
+  cat(sprintf("1. Brier Score: %.4f\n", brier))
+  cat(sprintf("2. Calibration Intercept: %.4f\n", intercept))
+  cat(sprintf("3. Calibration Slope (Đã hiệu chỉnh): %.4f\n", slope))
+  cat(sprintf("4. Optimism-corrected AUC: %.4f\n", auc_corrected))
+}
+
+cat("\n================ KẾT QUẢ CHO PHẢN BIỆN 2 ================\n")
+get_metrics(fit_air, val_air, cal_air, "MÔ HÌNH AIR ĐƠN THUẦN")
+get_metrics(fit_ct, val_ct, cal_ct, "MÔ HÌNH CLVT ĐƠN THUẦN")
+get_metrics(fit_scap, val_scap, cal_scap, "MÔ HÌNH SCAP")
+
+# =====================================================================
+# VẼ BIỂU ĐỒ ROC GỘP 3 ĐƯỜNG (CHUẨN XUẤT BẢN BÁO QUỐC TẾ)
+# =====================================================================
+
+# 1. Tùy chỉnh lề biểu đồ để không bị cắt chữ (Dưới, Trái, Trên, Phải)
+par(mar = c(5, 5, 2, 2) + 0.1) 
+
+# 2. Vẽ đường ROC cho mô hình SCAP (Vẽ đầu tiên để tạo khung)
+# Tham số cex.lab và cex.axis được tăng lên 1.3 và 1.2 để chữ to rõ
+plot(roc_scap, 
+     col = "red",                # Màu đỏ cho SCAP
+     lwd = 3,                    # Độ dày nét vẽ = 3 (đậm, dễ nhìn)
+     legacy.axes = TRUE,         # Trục hoành là 1 - Specificity
+     xlab = "1 - Độ đặc hiệu", 
+     ylab = "Độ nhạy",
+     cex.lab = 1.3,              # Phóng to nhãn trục
+     cex.axis = 1.2,             # Phóng to số trên trục
+     main = "")                  # Bỏ tiêu đề biểu đồ
+
+# 3. Vẽ chồng đường ROC cho mô hình CLVT
+plot(roc_ct, 
+     col = "blue",               # Màu xanh dương cho CLVT
+     lwd = 3, 
+     add = TRUE)                 # add = TRUE để vẽ đè lên hình cũ
+
+# 4. Vẽ chồng đường ROC cho mô hình AIR
+plot(roc_air, 
+     col = "forestgreen",        # Màu xanh lá cho AIR
+     lwd = 3, 
+     add = TRUE)
+
+# 5. Thêm bảng chú thích (Legend) ở góc dưới bên phải
+# Tự động lấy giá trị AUC đã tính để điền vào chú thích
+legend("bottomright",
+       legend = c(paste0("Thang điểm SCAP (AUC = ", round(auc(roc_scap), 3), ")"),
+                  paste0("Chỉ CLVT (AUC = ", round(auc(roc_ct), 3), ")"),
+                  paste0("Chỉ AIR (AUC = ", round(auc(roc_air), 3), ")")),
+       col = c("red", "blue", "forestgreen"),
+       lwd = 3,                  # Độ dày đường kẻ trong chú thích
+       cex = 1.1,                # Cỡ chữ của chú thích 
+       bty = "n")                # Bỏ viền hộp chú thích
