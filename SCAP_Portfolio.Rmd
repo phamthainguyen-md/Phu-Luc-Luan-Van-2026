@@ -1062,21 +1062,21 @@ plot_37
 ```
 
 # ======================================================================
-# BƯỚC 1: NẠP THƯ VIỆN & ĐỌC, LÀM SẠCH DỮ LIỆU
+# STEP 1: LOAD LIBRARIES & DATA CLEANING
 # ======================================================================
 library(haven)    
 library(dplyr)    
 library(rms)      
 
-# Đọc file SPSS từ ổ đĩa D
+# Read SPSS dataset
 data_goc <- read_sav("D:/NghienCuu/Nghiencuu.sav")
 
-# Quy đổi giá trị 2 thành 0, lột nhãn SPSS và TỰ ĐỘNG CẮT LẠI NGƯỠNG ĐỊNH LƯỢNG
+# Recode value 2 to 0, strip SPSS labels, and AUTOMATICALLY DICHOTOMIZE CONTINUOUS VARIABLES
 data_clean <- data_goc %>%
   mutate(
     GPB          = as.numeric(ifelse(GPB == 2, 0, GPB)), 
     
-    # Các biến định tính có sẵn (Quy giá trị 2 về 0)
+    # Existing categorical variables (Recode 2 to 0)
     nguongtuoi   = as.numeric(ifelse(nguongtuoi == 2, 0, nguongtuoi)),
     Soitrong     = as.numeric(ifelse(Soitrong == 2, 0, Soitrong)),
     nguongtnm    = as.numeric(ifelse(nguongtnm == 2, 0, nguongtnm)),
@@ -1086,26 +1086,26 @@ data_clean <- data_goc %>%
     dichkhutru   = as.numeric(ifelse(dichkhutru == 2, 0, dichkhutru)),
     nguongAIR    = as.numeric(ifelse(nguongAIR == 2, 0, nguongAIR)),
     
-    # CẮT NGƯỠNG TRỰC TIẾP TỪ BIẾN ĐỊNH LƯỢNG GỐC ĐỂ ĐẢM BẢO CHÍNH XÁC 100%
+    # DIRECTLY DICHOTOMIZE FROM RAW CONTINUOUS VARIABLES TO ENSURE 100% ACCURACY
     nguongdkrt   = as.numeric(ifelse(dkruotthua > 11.5, 1, 0)),
     nguongmt     = as.numeric(ifelse(dmanhtrang > 7.2, 1, 0)) 
   )
 
 # =====================================================================
-# BƯỚC 2: THIẾT LẬP MÔI TRƯỜNG CHO GÓI RMS
+# STEP 2: SET UP ENVIRONMENT FOR RMS PACKAGE
 # =====================================================================
 dd <- datadist(data_clean)
 options(datadist="dd")
 
 # =====================================================================
-# BƯỚC 3: KHỞI TẠO 3 MÔ HÌNH BẰNG HÀM lrm
+# STEP 3: INITIALIZE 3 MODELS USING lrm FUNCTION
 # =====================================================================
 fit_air <- lrm(GPB ~ AIR, data = data_clean, x = TRUE, y = TRUE)
 fit_ct <- lrm(GPB ~ dichkhutru + nguongtnm + nguongdkrt + nguongmt, data = data_clean, x = TRUE, y = TRUE)
 fit_scap <- lrm(GPB ~ dichkhutru + nguongtnm + nguongdkrt + nguongmt + nguongAIR, data = data_clean, x = TRUE, y = TRUE)
 
 # =====================================================================
-# BƯỚC 4: CHẠY BOOTSTRAP 2000 LẦN CHO CẢ 3 MÔ HÌNH
+# STEP 4: RUN BOOTSTRAP VALIDATION (2000 RESAMPLES) FOR ALL 3 MODELS
 # =====================================================================
 set.seed(123) 
 cal_air <- calibrate(fit_air, method = "boot", B = 2000)
@@ -1117,28 +1117,28 @@ val_ct <- validate(fit_ct, B = 2000)
 val_scap <- validate(fit_scap, B = 2000)
 
 # =====================================================================
-# BƯỚC 5: XUẤT 3 BIỂU ĐỒ TRÊN CÙNG 1 KHUNG HÌNH SẠCH ĐẸP
+# STEP 5: EXPORT 3 CALIBRATION PLOTS IN A SINGLE CLEAN FRAME
 # =====================================================================
 par(mfrow = c(1, 3), mar = c(5, 5, 2, 2), cex.axis = 1.2, cex.lab = 1.3)
 
 plot_cal <- function(cal_obj, label_text) {
   plot(cal_obj, 
        main = "", 
-       xlab = "Xác suất dự đoán (Predicted Probability)", 
-       ylab = "Tỷ lệ quan sát thực tế (Observed Proportion)",
+       xlab = "Predicted Probability", 
+       ylab = "Observed Proportion",
        xlim = c(0, 1), ylim = c(0, 1),
        scat1d.opts = list(frac = 0.05, lwd = 1.5), 
        subtitles = FALSE, 
-       legend = FALSE) # ĐÃ THÊM: Tắt chú thích tiếng Anh mặc định
+       legend = FALSE) # Disable default legend
   
-  # Gắn nhãn (A), (B), (C)
+  # Attach subplot labels (A), (B), (C)
   mtext(label_text, side = 3, adj = -0.1, line = 0.5, cex = 1.5, font = 2)
   
-  # ĐÃ SỬA: Chú thích tiếng Việt khớp hoàn toàn với màu đen và kiểu nét vẽ
+  # Custom manual legend perfectly matching the calibration lines
   legend("bottomright", 
-         legend = c("Lý tưởng (Ideal)", "Biểu kiến (Apparent)", "Đã hiệu chỉnh (Bias-corrected)"),
-         lty = c(2, 3, 1), # Khớp: Nét đứt (2), Nét chấm (3), Nét liền (1)
-         col = c("black", "black", "black"), # Đổi toàn bộ thành màu đen
+         legend = c("Ideal", "Apparent", "Bias-corrected"),
+         lty = c(2, 3, 1), # Dashed (2), Dotted (3), Solid (1)
+         col = c("black", "black", "black"), 
          lwd = c(1, 1, 2), 
          bty = "n", cex = 1.1)
 }
@@ -1150,7 +1150,7 @@ plot_cal(cal_scap, "(C)")
 par(mfrow = c(1, 1))
 
 # =====================================================================
-# BƯỚC 6: TRÍCH XUẤT CÁC CHỈ SỐ CHUYÊN SÂU
+# STEP 6: EXTRACT ADVANCED PERFORMANCE METRICS
 # =====================================================================
 get_metrics <- function(fit, val, cal, model_name) {
   p <- predict(fit, type = "fitted")
@@ -1166,65 +1166,63 @@ get_metrics <- function(fit, val, cal, model_name) {
   cat(sprintf("\n--- %s ---\n", model_name))
   cat(sprintf("1. Brier Score: %.4f\n", brier))
   cat(sprintf("2. Calibration Intercept: %.4f\n", intercept))
-  cat(sprintf("3. Calibration Slope (Đã hiệu chỉnh): %.4f\n", slope))
+  cat(sprintf("3. Calibration Slope (Optimism-corrected): %.4f\n", slope))
   cat(sprintf("4. Optimism-corrected AUC: %.4f\n", auc_corrected))
 }
 
-cat("\n================ KẾT QUẢ CHO PHẢN BIỆN 2 ================\n")
-get_metrics(fit_air, val_air, cal_air, "MÔ HÌNH AIR ĐƠN THUẦN")
-get_metrics(fit_ct, val_ct, cal_ct, "MÔ HÌNH CLVT ĐƠN THUẦN")
-get_metrics(fit_scap, val_scap, cal_scap, "MÔ HÌNH SCAP")
+cat("\n================ INTERNAL VALIDATION RESULTS ================\n")
+get_metrics(fit_air, val_air, cal_air, "AIR SCORE ONLY MODEL")
+get_metrics(fit_ct, val_ct, cal_ct, "CT IMAGING ONLY MODEL")
+get_metrics(fit_scap, val_scap, cal_scap, "SCAP SCORE MODEL")
 
 # =====================================================================
-# VẼ BIỂU ĐỒ ROC GỘP 3 ĐƯỜNG (CHUẨN XUẤT BẢN BÁO QUỐC TẾ)
+# PLOT COMBINED ROC CURVES (PUBLICATION-READY FORMAT)
 # =====================================================================
 
-# 1. Tùy chỉnh lề biểu đồ để không bị cắt chữ (Dưới, Trái, Trên, Phải)
+# 1. Adjust plot margins to prevent text cropping (Bottom, Left, Top, Right)
 par(mar = c(5, 5, 2, 2) + 0.1) 
 
-# 2. Vẽ đường ROC cho mô hình SCAP (Vẽ đầu tiên để tạo khung)
-# Tham số cex.lab và cex.axis được tăng lên 1.3 và 1.2 để chữ to rõ
+# 2. Plot ROC curve for SCAP model (Draw first to establish frame)
 plot(roc_scap, 
-     col = "red",                # Màu đỏ cho SCAP
-     lwd = 3,                    # Độ dày nét vẽ = 3 (đậm, dễ nhìn)
-     legacy.axes = TRUE,         # Trục hoành là 1 - Specificity
-     xlab = "1 - Độ đặc hiệu", 
-     ylab = "Độ nhạy",
-     cex.lab = 1.3,              # Phóng to nhãn trục
-     cex.axis = 1.2,             # Phóng to số trên trục
-     main = "")                  # Bỏ tiêu đề biểu đồ
+     col = "red",                # Red color for SCAP
+     lwd = 3,                    # Line width = 3 (bold, easy to read)
+     legacy.axes = TRUE,         # X-axis as 1 - Specificity
+     xlab = "1 - Specificity", 
+     ylab = "Sensitivity",
+     cex.lab = 1.3,              # Enlarge axis labels
+     cex.axis = 1.2,             # Enlarge axis numbers
+     main = "")                  # Remove main title
 
-# 3. Vẽ chồng đường ROC cho mô hình CLVT
+# 3. Overlay ROC curve for CT model
 plot(roc_ct, 
-     col = "blue",               # Màu xanh dương cho CLVT
+     col = "blue",               # Blue color for CT
      lwd = 3, 
-     add = TRUE)                 # add = TRUE để vẽ đè lên hình cũ
+     add = TRUE)                 # Overlay on existing plot
 
-# 4. Vẽ chồng đường ROC cho mô hình AIR
+# 4. Overlay ROC curve for AIR model
 plot(roc_air, 
-     col = "forestgreen",        # Màu xanh lá cho AIR
+     col = "forestgreen",        # Green color for AIR
      lwd = 3, 
      add = TRUE)
 
-# 5. Thêm bảng chú thích (Legend) ở góc dưới bên phải
-# Tự động lấy giá trị AUC đã tính để điền vào chú thích
+# 5. Add legend at bottom-right corner
 legend("bottomright",
-       legend = c(paste0("Thang điểm SCAP (AUC = ", round(auc(roc_scap), 3), ")"),
-                  paste0("Chỉ CLVT (AUC = ", round(auc(roc_ct), 3), ")"),
-                  paste0("Chỉ AIR (AUC = ", round(auc(roc_air), 3), ")")),
+       legend = c(paste0("SCAP Model (AUC = ", round(auc(roc_scap), 3), ")"),
+                  paste0("CT Only (AUC = ", round(auc(roc_ct), 3), ")"),
+                  paste0("AIR Only (AUC = ", round(auc(roc_air), 3), ")")),
        col = c("red", "blue", "forestgreen"),
-       lwd = 3,                  # Độ dày đường kẻ trong chú thích
-       cex = 1.1,                # Cỡ chữ của chú thích 
-       bty = "n")                # Bỏ viền hộp chú thích
+       lwd = 3,                  
+       cex = 1.1,                
+       bty = "n")                
 
 # =====================================================================
-# VẼ ĐƯỜNG CONG QUYẾT ĐỊNH HIỆU CHỈNH LẠC QUAN (OPTIMISM-CORRECTED DCA)
-# Dùng Bootstrap 2000 lần lặp - Biểu đồ thô (Raw) chuẩn xuất bản
+# PLOT OPTIMISM-CORRECTED DECISION CURVE ANALYSIS (DCA)
+# Using 2000 Bootstrap resamples - Publication-ready raw plot
 # =====================================================================
 library(ggplot2)
 library(dplyr)
 
-# 1. Khởi tạo hàm tính Lợi ích ròng (Net Benefit)
+# 1. Initialize Net Benefit (NB) calculation function
 calc_nb <- function(pred_prob, outcome, thresholds) {
   sapply(thresholds, function(pt) {
     tp <- sum(pred_prob >= pt & outcome == 1)
@@ -1235,93 +1233,93 @@ calc_nb <- function(pred_prob, outcome, thresholds) {
   })
 }
 
-# 2. Định nghĩa các mô hình gốc trên tập dữ liệu data_clean
+# 2. Define original models on the cleaned dataset (data_clean)
 fit_air_glm <- glm(GPB ~ AIR, data = data_clean, family = binomial)
 fit_ct_glm <- glm(GPB ~ dichkhutru + nguongtnm + nguongdkrt + nguongmt, data = data_clean, family = binomial)
 fit_scap_glm <- glm(GPB ~ dichkhutru + nguongtnm + nguongdkrt + nguongmt + nguongAIR, data = data_clean, family = binomial)
 
-# Cài đặt dải xác suất (ngưỡng 0 đến 90%)
+# Set probability thresholds (0 to 90%)
 thresholds <- seq(0, 0.9, by = 0.01)
 
-# 3. Tính Lợi ích ròng biểu kiến (Apparent NB)
+# 3. Calculate Apparent Net Benefit (Apparent NB)
 nb_app_air <- calc_nb(predict(fit_air_glm, type="response"), data_clean$GPB, thresholds)
 nb_app_ct <- calc_nb(predict(fit_ct_glm, type="response"), data_clean$GPB, thresholds)
 nb_app_scap <- calc_nb(predict(fit_scap_glm, type="response"), data_clean$GPB, thresholds)
 
-# 4. Chạy Bootstrap để tính độ lạc quan (Optimism)
-# LƯU Ý: Quá trình lặp 2000 lần sẽ mất khoảng 1-2 phút tùy cấu hình máy. Vui lòng chờ!
+# 4. Run Bootstrap resampling to calculate Optimism
+# NOTE: The 2000 iterations will take 1-2 minutes depending on hardware. Please wait!
 B <- 2000 
 opt_air <- matrix(0, nrow = B, ncol = length(thresholds))
 opt_ct <- matrix(0, nrow = B, ncol = length(thresholds))
 opt_scap <- matrix(0, nrow = B, ncol = length(thresholds))
 
-set.seed(123) # Khóa seed để kết quả cố định mỗi lần chạy
+set.seed(123) # Set seed for reproducibility
 for(i in 1:B) {
-  # Lấy mẫu Bootstrap có hoàn lại
+  # Draw bootstrap sample with replacement
   boot_idx <- sample(1:nrow(data_clean), replace = TRUE)
   boot_data <- data_clean[boot_idx, ]
   
-  # Huấn luyện lại mô hình trên mẫu Bootstrap
+  # Re-train model on bootstrap sample
   boot_fit_air <- glm(formula(fit_air_glm), data = boot_data, family = binomial)
   boot_fit_ct <- glm(formula(fit_ct_glm), data = boot_data, family = binomial)
   boot_fit_scap <- glm(formula(fit_scap_glm), data = boot_data, family = binomial)
   
-  # Tính NB trên tập Bootstrap (Bootstrap NB)
+  # Calculate NB on bootstrap sample (Bootstrap NB)
   nb_boot_air <- calc_nb(predict(boot_fit_air, type="response"), boot_data$GPB, thresholds)
   nb_boot_ct <- calc_nb(predict(boot_fit_ct, type="response"), boot_data$GPB, thresholds)
   nb_boot_scap <- calc_nb(predict(boot_fit_scap, type="response"), boot_data$GPB, thresholds)
   
-  # Tính NB trên tập dữ liệu gốc (Test NB)
+  # Calculate NB on original dataset (Test NB)
   nb_test_air <- calc_nb(predict(boot_fit_air, newdata=data_clean, type="response"), data_clean$GPB, thresholds)
   nb_test_ct <- calc_nb(predict(boot_fit_ct, newdata=data_clean, type="response"), data_clean$GPB, thresholds)
   nb_test_scap <- calc_nb(predict(boot_fit_scap, newdata=data_clean, type="response"), data_clean$GPB, thresholds)
   
-  # Lạc quan = Bootstrap NB - Test NB
+  # Optimism = Bootstrap NB - Test NB
   opt_air[i, ] <- nb_boot_air - nb_test_air
   opt_ct[i, ] <- nb_boot_ct - nb_test_ct
   opt_scap[i, ] <- nb_boot_scap - nb_test_scap
 }
 
-# 5. Tính Lợi ích ròng đã hiệu chỉnh (Optimism-Corrected NB)
+# 5. Calculate Optimism-Corrected Net Benefit
 corr_nb_air <- nb_app_air - colMeans(opt_air, na.rm=TRUE)
 corr_nb_ct <- nb_app_ct - colMeans(opt_ct, na.rm=TRUE)
 corr_nb_scap <- nb_app_scap - colMeans(opt_scap, na.rm=TRUE)
 
-# Tính NB cho 2 đường tham chiếu
+# Calculate NB for 2 reference lines (Treat All / Treat None)
 prev <- mean(data_clean$GPB)
 nb_treat_all <- prev - (1 - prev) * (thresholds / (1 - thresholds))
 nb_treat_none <- rep(0, length(thresholds))
 
-# 6. Gom dữ liệu để chuẩn bị vẽ
+# 6. Aggregate data for plotting
 dca_df <- data.frame(
   Threshold = rep(thresholds, 5),
   NB = c(corr_nb_scap, corr_nb_ct, corr_nb_air, nb_treat_all, nb_treat_none),
-  Strategy = factor(rep(c("Mô hình SCAP", "Mô hình CLVT", "Mô hình AIR", "Can thiệp tất cả", "Không can thiệp"), 
+  Strategy = factor(rep(c("SCAP Model", "CT Model", "AIR Model", "Treat All", "Treat None"), 
                         each = length(thresholds)),
-                    levels = c("Mô hình SCAP", "Mô hình CLVT", "Mô hình AIR", "Can thiệp tất cả", "Không can thiệp"))
+                    levels = c("SCAP Model", "CT Model", "AIR Model", "Treat All", "Treat None"))
 )
 
-# Cắt các giá trị âm sâu dưới -0.05 để biểu đồ không bị nhiễu
+# Truncate deep negative values below -0.05 to avoid plot noise
 dca_df$NB[dca_df$NB < -0.05] <- NA 
 
-# 7. Vẽ biểu đồ thô trung thực 100% bằng geom_line
+# 7. Plot 100% authentic raw graph using geom_line
 ggplot(dca_df, aes(x = Threshold, y = NB, color = Strategy, linetype = Strategy)) +
   geom_line(linewidth = 1) + 
-  scale_color_manual(values = c("Mô hình SCAP" = "#C77CFF",        
-                                "Mô hình CLVT" = "#00BFC4",        
-                                "Mô hình AIR" = "#00BA38",         
-                                "Can thiệp tất cả" = "#F8766D",    
-                                "Không can thiệp" = "#B79F00")) +  
-  scale_linetype_manual(values = c("Mô hình SCAP" = "solid", 
-                                   "Mô hình CLVT" = "solid", 
-                                   "Mô hình AIR" = "solid", 
-                                   "Can thiệp tất cả" = "solid", 
-                                   "Không can thiệp" = "solid")) +
+  scale_color_manual(values = c("SCAP Model" = "#C77CFF",        
+                                "CT Model" = "#00BFC4",        
+                                "AIR Model" = "#00BA38",         
+                                "Treat All" = "#F8766D",    
+                                "Treat None" = "#B79F00")) +  
+  scale_linetype_manual(values = c("SCAP Model" = "solid", 
+                                   "CT Model" = "solid", 
+                                   "AIR Model" = "solid", 
+                                   "Treat All" = "solid", 
+                                   "Treat None" = "solid")) +
   scale_x_continuous(labels = scales::percent_format(accuracy = 1)) +
-  labs(x = "Ngưỡng xác suất (Threshold Probability)",
-       y = "Lợi ích ròng (Net Benefit)",
-       color = "Chiến lược",
-       linetype = "Chiến lược") +
+  labs(x = "Threshold Probability",
+       y = "Net Benefit",
+       color = "Strategy",
+       linetype = "Strategy") +
   theme_classic() +
   theme(
     axis.text = element_text(size = 14, color = "black"), 
