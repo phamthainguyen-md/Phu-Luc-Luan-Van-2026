@@ -15,9 +15,9 @@ The SCAP model has been successfully digitized into interactive web applications
 ## 🔒 Data Privacy & Ethical Compliance
 In strict compliance with medical ethics and patient privacy regulations, the raw clinical dataset is **not publicly available** in this repository. All sensitive patient health information (PHI) is securely managed and encrypted within the hospital's internal REDCap system. 
 
-## 📂 Repository Structure
-```text
-├── R_scripts/            # Core R scripts for statistical modeling (Logistic Regression, Bootstrap, DCA)
-├── WebApp_Nextjs/        # Source code for the Vercel-deployed web application
-├── Shiny_Prototype/      # R Shiny app source code
-└── README.md
+## 📂 Source Code Availability
+
+*   **Statistical Analysis (`SCAP_Portfolio.Rmd`)**: The core R Markdown file containing the statistical methodology, performance evaluation (Bootstrap resampling, ROC analysis), and Decision Curve Analysis (DCA) is publicly available in this repository.
+*   **Web Application Repositories**: The full source code for the Next.js and R Shiny applications is currently maintained in **private repositories** to protect proprietary algorithms prior to the official publication of our peer-reviewed article. 
+
+*Researchers or academic institutions interested in code collaboration for the web applications can contact the author directly.*
