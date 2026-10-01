@@ -19,4 +19,4 @@ The peer-reviewed paper associated with this project is currently in preparation
 
 **Pham, T. N. (2026). *R Source Code for SCAP Model: Prediction of Acute Complicated Appendicitis*. Medical Residency Thesis. GitHub repository. https://github.com/phamthainguyen-md/Phu-Luc-Luan-Van-2026**
 
-Pham, T. N. (2027). Development and Internal Validation of a Combined Computed Tomography and AIR Scoring System for Predicting Complicated Acute Appendicitis in Surgical Patients at Nhan Dan Gia Dinh Hospital [Preprint]
+**Pham, T. N. (2027). Development and Internal Validation of a Combined Computed Tomography and AIR Scoring System for Predicting Complicated Acute Appendicitis in Surgical Patients at Nhan Dan Gia Dinh Hospital [Preprint]**
