@@ -15,9 +15,10 @@ The SCAP model has been successfully digitized into interactive web applications
 ## 🔒 Data Privacy & Ethical Compliance
 In strict compliance with medical ethics and patient privacy regulations, the raw clinical dataset is **not publicly available** in this repository. All sensitive patient health information (PHI) is securely managed and encrypted within the hospital's internal REDCap system. 
 
-## 📂 Source Code Availability
+## 📂 Source Code Availability & Reproducibility
 
-*   **Statistical Analysis (`SCAP_Portfolio.Rmd`)**: The core R Markdown file containing the statistical methodology, performance evaluation (Bootstrap resampling, ROC analysis), and Decision Curve Analysis (DCA) is publicly available in this repository.
+*   **Interactive Statistical Report:** The comprehensive HTML report encompassing the full methodology, Bootstrap validation loops, ROC plotting, and Optimism-corrected DCA can be viewed directly here: **[SCAP Model Statistical Portfolio](https://phamthainguyen-md.github.io/Phu-Luc-Luan-Van-2026/SCAP_Portfolio.html)**.
+*   **Statistical Analysis Script (`SCAP_Portfolio.Rmd`)**: The core R Markdown file containing the raw R scripts is publicly available in this repository.
 *   **Web Application Repositories**: The full source code for the Next.js and R Shiny applications is currently maintained in **private repositories** to protect proprietary algorithms prior to the official publication of our peer-reviewed article. 
 
 *Researchers or academic institutions interested in code collaboration for the web applications can contact the author directly.*
