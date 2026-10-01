@@ -1,22 +1,23 @@
-# Phu-Luc-Luan-Van-2026
-Kho lưu trữ mã lệnh R và dữ liệu phân tích mô hình SCAP.
- 
+# SCAP Score: Predicting Complicated Acute Appendicitis 🚀
 
-Tuân thủ quy định về y đức, bộ dữ liệu gốc không được đăng tải công khai mà được quản lý bảo mật trên hệ thống REDCap của bệnh viện.
+![R](https://img.shields.io/badge/R-276DC3?style=for-the-badge&logo=r&logoColor=white)
+![Next.js](https://img.shields.io/badge/Next.js-000000?style=for-the-badge&logo=nextdotjs&logoColor=white)
+![License: MIT](https://img.shields.io/badge/License-MIT-green.svg?style=for-the-badge)
 
-### 🌐 SCAP Web Application (Live Demo)
+This repository contains the source code, statistical modeling scripts, and web application deployment files for the **SCAP (Score for Complicated Acute Appendicitis Prediction)** system. The model integrates clinical parameters (AIR score) with Computed Tomography (CT) imaging features to stratify the risk of complications in acute appendicitis patients.
 
-Mô hình SCAP đã được số hóa thành ứng dụng máy tính dự báo trực tuyến. Các bác sĩ lâm sàng có thể nhẩm tính nhanh xác suất biến chứng của bệnh nhân viêm ruột thừa cấp ngay tại phòng cấp cứu thông qua 2 nền tảng:
+## 🌐 Live Web Application (Clinical Tool)
+The SCAP model has been successfully digitized into interactive web applications, allowing clinicians to perform rapid risk stratification in the emergency department.
 
-* 🚀 **[Phiên bản Vercel (Khuyên dùng)](https://scap-app.vercel.app)**: Xây dựng trên nền tảng Next.js hiện đại, tốc độ phản hồi cực nhanh, tối ưu hóa giao diện cho điện thoại di động khi thao tác lâm sàng.
-* 📊 **[Phiên bản R Shiny (Nguyên bản)](https://dr-nguyen-scap-score.shinyapps.io/SCAP/)**: Phiên bản sơ khởi dùng để kiểm thử thuật toán và biểu diễn thống kê trong quá trình nghiên cứu (thời gian tải trang có thể chậm hơn).
+* 🚀 **[SCAP Next.js Version (Recommended)](https://scap-app.vercel.app)**: Production-ready web app built with modern Next.js. Highly optimized for mobile devices and clinical workflows.
+* 📊 **[R Shiny Prototype](https://dr-nguyen-scap-score.shinyapps.io/SCAP/)**: The original prototype version used for algorithmic testing and statistical visualization during the research phase.
 
----
+## 🔒 Data Privacy & Ethical Compliance
+In strict compliance with medical ethics and patient privacy regulations, the raw clinical dataset is **not publicly available** in this repository. All sensitive patient health information (PHI) is securely managed and encrypted within the hospital's internal REDCap system. 
 
-## How to Cite
-
-The peer-reviewed paper associated with this project is currently in preparation. If you use this source code or the SCAP model methodology in your research, please cite the original Medical Residency Thesis as follows:
-
-**Pham, T. N. (2026). *R Source Code for SCAP Model: Prediction of Acute Complicated Appendicitis*. Medical Residency Thesis. GitHub repository. https://github.com/phamthainguyen-md/Phu-Luc-Luan-Van-2026**
-
-**Pham, T. N. (2027). Development and Internal Validation of a Combined Computed Tomography and AIR Scoring System for Predicting Complicated Acute Appendicitis in Surgical Patients at Nhan Dan Gia Dinh Hospital [Preprint]**
+## 📂 Repository Structure
+```text
+├── R_scripts/            # Core R scripts for statistical modeling (Logistic Regression, Bootstrap, DCA)
+├── WebApp_Nextjs/        # Source code for the Vercel-deployed web application
+├── Shiny_Prototype/      # R Shiny app source code
+└── README.md
