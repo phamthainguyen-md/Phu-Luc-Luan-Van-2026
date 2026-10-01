@@ -1,0 +1,11 @@
+cff-version: 1.2.0
+message: "If you use this software or model in your research, please cite it as below."
+authors:
+  - family-names: "Pham"
+    given-names: "Thai-Nguyen"
+    orcid: "[https://orcid.org/0009-0001-6004-4238](https://orcid.org/0009-0001-6004-4238)"
+title: "SCAP Model: Prediction of Acute Complicated Appendicitis"
+version: 1.0.0
+date-released: 2026-10-01
+url: "[https://scap-app.vercel.app](https://scap-app.vercel.app)"
+repository-code: "[https://github.com/phamthainguyen-md/Phu-Luc-Luan-Van-2026](https://github.com/phamthainguyen-md/Phu-Luc-Luan-Van-2026)"
